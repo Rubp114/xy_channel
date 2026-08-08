@@ -23,6 +23,12 @@ export interface XYChannelConfig {
    * 显式配置为空数组可禁用该行为。
    */
   pinnedSessionIds: string[];
+  /** Base delay in ms for reconnect backoff (default 1000) */
+  reconnectBaseMs?: number;
+  /** Max reconnect delay cap in ms (default 30000) */
+  reconnectMaxMs?: number;
+  /** First reconnect attempt is uniformly spread over [0, this] ms to dilute mass-reconnect storms (default 3000) */
+  reconnectFirstMaxMs?: number;
 }
 
 // ============================================================================

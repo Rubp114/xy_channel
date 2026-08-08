@@ -1085,9 +1085,15 @@ export class XYWebSocketManager extends EventEmitter {
   }
 
   /**
-   * Reconnect with fast-retry-then-backoff schedule.
-   * 前几次快速重试（0.5/1/1/2/4s + 随机抖动），之后指数退避封顶 30s。
-   * 修复：旧版首次就 1s 起步指数增长，503 场景累计 31s+10s 缓冲 = 42s 才恢复。
+   * Reconnect with exponential backoff + full jitter.
+   *
+   * A server outage makes every client detect the drop at the same moment and
+   * start from the same attempt counter, so a deterministic delay sequence
+   * (1s, 2s, 4s, ...) makes all clients reconnect in lock-step waves. Full
+   * jitter draws each delay uniformly from [0, window] so the herd spreads
+   * out and stays decorrelated even after many rounds at the cap:
+   * - attempt 1: window = reconnectFirstMaxMs (dilutes the first burst)
+   * - attempt ≥2: window = min(base * 2^(n-1), reconnectMaxMs)
    */
   private reconnectServer(): void {
     if (this.isShuttingDown) return;
@@ -1099,15 +1105,18 @@ export class XYWebSocketManager extends EventEmitter {
     }
 
     this.state.reconnectAttempts++;
-
-    const FAST_RETRY_SCHEDULE = [500, 1000, 1000, 2000, 4000];
     const attempt = this.state.reconnectAttempts;
-    const base =
-      attempt <= FAST_RETRY_SCHEDULE.length
-        ? FAST_RETRY_SCHEDULE[attempt - 1]
-        : Math.min(1000 * Math.pow(2, attempt - 1), 30000);
-    const delay = base + Math.floor(Math.random() * 250); // 随机抖动，避免多实例同步重连
-    this.log(`Reconnecting in ${delay}ms (attempt ${attempt})...`);
+
+    const baseMs = this.config.reconnectBaseMs ?? 1000;
+    const maxMs = this.config.reconnectMaxMs ?? 30000;
+    const firstMaxMs = this.config.reconnectFirstMaxMs ?? 3000;
+
+    const windowMs = attempt === 1
+      ? firstMaxMs
+      : Math.min(baseMs * Math.pow(2, attempt - 1), maxMs);
+    const delay = Math.round(Math.random() * windowMs);
+
+    this.log(`Reconnecting in ${delay}ms (attempt ${attempt}, window ${windowMs}ms)...`);
 
     const timer = setTimeout(() => {
       this.reconnectTimer = null;
