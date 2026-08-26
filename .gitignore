@@ -13,5 +13,7 @@ package-lock.json
 Thumbs.db
 
 
+*.tgz
+
 # Python
 __pycache__/
