@@ -11,10 +11,11 @@
 //      查找文件/分析图片/生成图片/生成音乐/生成视频/下载文件/使用工具）
 //
 // 2) 技能命令（namespace=Common, name=Action）：模型 cd 进技能目录或读
-//    技能 SKILL.md 时下发，payload={ skillName, text }
-//    - cd 进技能目录 → text=使用技能 <skillName>
-//    - 读 SKILL.md    → text=查看技能 <skillName>（同命令内 cd+读 md 判为查看）
-//    - 合并去重：read 工具读 SKILL.md 时只发技能命令，不再发「读取文件」
+//    技能目录下的 md 文件（SKILL.md 或 references/ 等参考文档）时下发，
+//    payload={ skillName, text }
+//    - cd 进技能目录     → text=使用技能 <skillName>
+//    - 读技能目录下的 md → text=查看技能 <skillName>（同命令内 cd+读 md 判为查看）
+//    - 合并去重：read 工具读技能 md 时只发技能命令，不再发「读取文件」
 //      StepInfo；read 普通文件只发「读取文件」StepInfo。
 //    - exec 命令命中技能检测时，技能命令与「运行命令」StepInfo 并存。
 //
@@ -134,10 +135,11 @@ function extractSkillNameFromPathText(text: string): string | null {
   return m ? m[1] : null;
 }
 
-/** 读 SKILL.md 检测：路径形如 .../skills/<name>/SKILL.md（含 core_skills）。 */
+/** 读技能 md 检测：路径形如 .../skills/<name>/ 下的任意 .md 文件
+ *  （SKILL.md 本体或 references/ 等子目录中的参考文档，含 core_skills）。 */
 function extractSkillNameFromMdPath(text: string): string | null {
   const normalized = text.replace(/\\/g, "/");
-  const m = normalized.match(/(?:core_)?skills\/([^/'"\s;&|]+)\/SKILL\.md/i);
+  const m = normalized.match(/(?:core_)?skills\/([^/'"\s;&|]+)\/[^\s"';&|]*\.md/i);
   return m ? m[1] : null;
 }
 
@@ -153,7 +155,7 @@ function detectCdIntoSkill(command: string): string | null {
   return extractSkillNameFromPathText(cdMatch[1]);
 }
 
-/** read 工具路径分类：技能 SKILL.md 或普通文件。 */
+/** read 工具路径分类：技能目录下的 md 文件或普通文件。 */
 function classifyReadPath(path: unknown): { kind: "skill"; skillName: string } | { kind: "normal" } | null {
   if (typeof path !== "string" || path.trim().length === 0) return null;
   const skillName = extractSkillNameFromMdPath(path);
@@ -189,7 +191,7 @@ function detectSkillAction(
   return null;
 }
 
-/** 判断该工具调用是否应跳过 StepInfo（read 技能 SKILL.md 只发技能命令）。 */
+/** 判断该工具调用是否应跳过 StepInfo（read 技能 md 只发技能命令）。 */
 function shouldSkipStepInfo(event: { toolName?: string; params?: Record<string, unknown> }): boolean {
   if (event.toolName !== "read") return false;
   return classifyReadPath(event.params?.path)?.kind === "skill";
@@ -334,7 +336,7 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
       const sendCtx = resolveSendContext(event, ctx);
       if (!sendCtx) return;
 
-      // 1. 技能命令（cd 进技能目录 / 读 SKILL.md）
+      // 1. 技能命令（cd 进技能目录 / 读技能目录下的 md）
       const skillAction = detectSkillAction(event);
       if (skillAction) {
         await sendSkillCommand({
@@ -348,9 +350,9 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
         );
       }
 
-      // 2. StepInfo（read 技能 SKILL.md 时只走技能命令，跳过读取文件）
+      // 2. StepInfo（read 技能 md 时只走技能命令，跳过读取文件）
       if (shouldSkipStepInfo(event)) {
-        logger.log(`${LOG_TAG} skip StepInfo: read skill SKILL.md, tool=${event.toolName}`);
+        logger.log(`${LOG_TAG} skip StepInfo: read skill md, tool=${event.toolName}`);
         return;
       }
       const displayName = DISPLAY_BY_TOOL[event.toolName];
@@ -375,7 +377,7 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
   // 工具执行后：StepInfo(tool_result, success + result)
   api.on("after_tool_call", async (event, ctx) => {
     try {
-      // read 技能 SKILL.md 的 result 也不发 StepInfo（与 before 侧去重对齐）
+      // read 技能 md 的 result 也不发 StepInfo（与 before 侧去重对齐）
       if (shouldSkipStepInfo(event)) return;
       const displayName = DISPLAY_BY_TOOL[event.toolName];
       if (!displayName) return;

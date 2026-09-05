@@ -19,6 +19,7 @@ import { registerToolStatusHook } from "./src/tool-status-hook.js";
 import { registerStepInfoHook } from "./src/tools/step-info-tool.js";
 import { recoverCronState } from "./src/cron-recovery.js";
 import type { CronRecoveryResult } from "./src/cron-recovery.js";
+import { syncScheduledTaskOnCronChanged } from "./src/cron-scheduled-tasks-sync.js";
 import { writeSkillUsage } from "./src/utils/skills-logger.js";
 import {
   markSubagentSpawned,
@@ -453,6 +454,9 @@ function registerCronChangedHook(api: OpenClawPluginApi): void {
         },
       })}`,
     );
+
+    // 任务变更同步到云端（added/updated/removed/finished；内部全 try/catch）
+    await syncScheduledTaskOnCronChanged(event);
   });
 }
 
