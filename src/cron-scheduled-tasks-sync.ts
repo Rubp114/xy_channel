@@ -2,6 +2,8 @@
 //
 // action ∈ {added, updated, removed, finished}（started 不同步）时 POST：
 //   {SERVICE_URL}/fulfillment/v1/claw/scheduled-tasks/sync
+// 纯 HTTPS POST（fetch），不建 WebSocket 连接 —— 与 invoke 云端调用的
+// wss 方式无关，仅复用其 env 配置。
 //
 // - baseurl 与 invoke 工具同源：~/.openclaw/.xiaoyienv 的 SERVICE_URL
 //   （复用 invoke 的 loadCloudConfig，含 PERSONAL-API-KEY / PERSONAL-UID）
@@ -75,7 +77,13 @@ export async function syncScheduledTaskOnCronChanged(event: CronChangedLike): Pr
       return;
     }
 
-    const url = `${config.serviceUrl.replace(/\/+$/, "")}${SYNC_API_SUFFIX}`;
+    // 纯 HTTPS POST，不走 wss。invoke 的 WS 调用会把 http(s) 转成 ws(s)，
+    // 这里反向兜底：SERVICE_URL 若写成 ws(s):// 也归一化回 http(s)://，
+    // 域名/端口/路径保持不变。
+    const baseUrl = config.serviceUrl
+      .replace(/^ws(s)?:\/\//i, "http$1://")
+      .replace(/\/+$/, "");
+    const url = `${baseUrl}${SYNC_API_SUFFIX}`;
     const traceId = resolveTraceId(config.uid);
     const headers: Record<string, string> = {
       "Content-Type": "application/json",

@@ -1,6 +1,6 @@
 {
   "name": "@ynhcj/xiaoyi-channel",
-  "version": "11.26.2026.9.5-release2026060601",
+  "version": "9.00.2026.9.7-release2026060601",
   "description": "OpenClaw Xiaoyi Channel plugin - Xiaoyi A2A protocol integration",
   "type": "module",
   "main": "./dist/index.js",
