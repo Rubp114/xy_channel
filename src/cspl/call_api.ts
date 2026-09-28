@@ -26,9 +26,10 @@ import {
     MAX_TRACE_ID_LENGTH
 } from './constants.js';
 
-// 安全扫描接口 trace-id：sessionId 为空时降级为 uuid，超过 MAX_TRACE_ID_LENGTH 截断
-function buildTraceId(sessionId: string): string {
-    const traceId = sessionId ? sessionId : crypto.randomUUID();
+// 安全扫描接口 trace-id：sessionId 非空时按新接口约定以 '_' 拼接毫秒时间戳保证唯一性，
+// sessionId 为空时降级为 uuid，超过 MAX_TRACE_ID_LENGTH 截断
+export function buildTraceId(sessionId: string): string {
+    const traceId = sessionId ? `${sessionId}_${Date.now()}` : crypto.randomUUID();
     return traceId.length > MAX_TRACE_ID_LENGTH ? traceId.substring(0, MAX_TRACE_ID_LENGTH) : traceId;
 }
 

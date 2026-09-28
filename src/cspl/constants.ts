@@ -37,7 +37,8 @@ export interface NewRequestPayload {
     businessID: string;
     sceneID: string;
     checkPoint: number;
-    interActionID: number;
+    // 原 interActionID，新接口更名为 seqNo（值仍从 taskId 第一个&和第二个&之间提取）
+    seqNo: number;
     loginType?: string;
     reqTime?: string;
     message: object;
