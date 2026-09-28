@@ -670,7 +670,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       registerToolStatusHook(api);
       // Step-info hook (skill usage merged in): push Common/StepInfo command on
       // every classified tool call/result (tool_call 带 arguments,
-      // tool_result 带 success+result), and Common/Action skill commands on
+      // tool_result 带 success+result), and Common/Skill skill commands on
       // cd-into-skill-dir / SKILL.md reads (查看技能/使用技能)
       registerStepInfoHook(api);
     }

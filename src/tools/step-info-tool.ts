@@ -10,7 +10,7 @@
 //    - displayName 按分类映射（网页搜索/运行命令/文件创建/编辑文件/读取文件/
 //      查找文件/分析图片/生成图片/生成音乐/生成视频/下载文件/使用工具）
 //
-// 2) 技能命令（namespace=Common, name=Action）：模型 cd 进技能目录或读
+// 2) 技能命令（namespace=Common, name=Skill）：模型 cd 进技能目录或读
 //    技能 SKILL.md 时下发，payload={ skillName, text }
 //    - cd 进技能目录 → text=使用技能 <skillName>
 //    - 读 SKILL.md    → text=查看技能 <skillName>（同命令内 cd+读 md 判为查看）
@@ -290,7 +290,7 @@ async function sendStepInfo(params: {
   });
 }
 
-/** 下发一条技能命令（Common/Action，payload={ skillName, text }）。 */
+/** 下发一条技能命令（Common/Skill，payload={ skillName, text }）。 */
 async function sendSkillCommand(params: {
   config: XYChannelConfig;
   sessionId: string;
@@ -306,7 +306,7 @@ async function sendSkillCommand(params: {
       : `使用技能 ${params.skillName}`;
 
   const command: A2ACommand = {
-    header: { namespace: "Common", name: "Action" },
+    header: { namespace: "Common", name: "Skill" },
     payload: {
       skillName: params.skillName,
       text,
