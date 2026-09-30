@@ -403,9 +403,11 @@ function readMdFile(filePath: string): { fileDetail: string } {
 const MEMORY_LOG_PATH = path.join(os.homedir(), ".openclaw", ".memory.log");
 const MEMORY_HISTORY_DAYS = 7;
 const MEMORY_RETENTION_DAYS = 30;
+const MEMORY_HISTORY_MAX_ENTRIES = 100;
 
 /**
- * Read ~/.openclaw/.memory.log, return last 7 days grouped by date,
+ * Read ~/.openclaw/.memory.log, return last 7 days grouped by date
+ * (newest first, at most MEMORY_HISTORY_MAX_ENTRIES entries total),
  * then prune entries older than 30 days.
  *
  * Log line format: `2026-06-22T15:18:00|user.md|更新了xxxx`
@@ -475,10 +477,21 @@ function handleMemoryHistory(): Array<Record<string, Array<{ fileName: string; d
   }
 
   // Build ans array sorted by date descending, each entry is { <date>: [...] }.
-  const ans = Array.from(byDate.keys())
-    .sort()
-    .reverse()
-    .map((dateStr) => ({ [dateStr]: byDate.get(dateStr)!.reverse() }));
+  // Cap the total at MEMORY_HISTORY_MAX_ENTRIES, keeping the newest entries
+  // (dates iterate newest-first; within a day, reverse() puts newest first).
+  const ans: Array<Record<string, Array<{ fileName: string; detail: string; time: string }>>> = [];
+  let remaining = MEMORY_HISTORY_MAX_ENTRIES;
+  let totalInWindow = 0;
+  let totalReturned = 0;
+  for (const dateStr of Array.from(byDate.keys()).sort().reverse()) {
+    const entries = byDate.get(dateStr)!.reverse();
+    totalInWindow += entries.length;
+    if (remaining <= 0) continue;
+    const kept = entries.slice(0, remaining);
+    ans.push({ [dateStr]: kept });
+    remaining -= kept.length;
+    totalReturned += kept.length;
+  }
 
   // Prune memory.log: keep only the last 30 days.
   try {
@@ -491,6 +504,9 @@ function handleMemoryHistory(): Array<Record<string, Array<{ fileName: string; d
     logger.error(`[MEMORY-QUERY] Failed to prune memory.log:`, err);
   }
 
-  logger.log(`[MEMORY-QUERY] MemoryHistory: returning ${ans.length} date buckets`);
+  logger.log(
+    `[MEMORY-QUERY] MemoryHistory: returning ${ans.length} date buckets, ` +
+      `${totalReturned}/${totalInWindow} entries (cap=${MEMORY_HISTORY_MAX_ENTRIES})`,
+  );
   return ans;
 }
