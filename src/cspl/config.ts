@@ -27,7 +27,7 @@ const DEFAULT_CONFIG = {
         timeout: 5000,
     },
     headers: {} as HttpHeaders,
-    skillId: 'ai-security',
+    skillId: 'moderation-text',
     requestFrom: 'openclaw',
     textSource: 'question',
     action: TOOL_OUTPUT_ACTION,
