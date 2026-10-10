@@ -2,6 +2,7 @@
 // 纯 A2A 帧构建器：只负责组帧，最后一跳统一走 conversation/outbound-gateway。
 import { v4 as uuidv4 } from "uuid";
 import { sendWsFrame } from "./conversation/outbound-gateway.js";
+import { getOrCreateStreamTextId, releaseStreamTextId } from "./utils/stream-text-id.js";
 import { logger } from "./utils/logger.js";
 import { redactSensitiveText, containsSensitiveInfo } from "./sensitive-redactor.js";
 import { rewriteOutboundApprovalText } from "./approval-bridge.js";
@@ -80,11 +81,16 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   const bridgedText = text === undefined ? text : rewriteOutboundApprovalText(sessionId, text);
 
   // Build artifact update event
+  // lastChunk 标识本轮 turn 的文本流是否结束：终帧（final=true）为 true，
+  // 流式进行中的中间帧为 false。streamTextId 为本轮 turn 文本流的独立标识，
+  // turn 内所有文本帧共享，turn 结束后（final 帧发出）释放，下轮更换新 id。
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
     kind: "artifact-update",
+    isNew: true,
     append,
-    lastChunk: true,
+    lastChunk: final,
+    streamTextId: getOrCreateStreamTextId(taskId),
     final,
     artifact: {
       artifactId: uuidv4(),
@@ -130,10 +136,14 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   // Send via WebSocket（经 outbound-gateway 收口）
   if (shouldLog) {
     const redactedText = redactSensitiveText(bridgedText ?? "");
-    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, text=${buildTextPreview(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
+    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, lastChunk=${final}, streamTextId=${artifact.streamTextId}, text=${buildTextPreview(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
   }
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+  // 终帧（本轮 turn 文本输出完成）发出后释放 streamTextId，下轮 turn 生成新 id
+  if (final) {
+    releaseStreamTextId(taskId);
+  }
   if (shouldLog) {
     log.log(`[A2A_RESPONSE] Message sent successfully`);
   }
@@ -154,7 +164,8 @@ export interface SendReasoningTextUpdateParams {
 /**
  * Send an A2A artifact-update with reasoningText part.
  * Used for onToolStart, onToolResult, onReasoningStream, onReasoningEnd, onPartialReply.
- * append=true, final=false, lastChunk=true, text is suffixed with newline for markdown rendering.
+ * append=true, final=false, lastChunk=false（思维链为流式中间帧，非 turn 文本完成标记）,
+ * text is suffixed with newline for markdown rendering.
  */
 export async function sendReasoningTextUpdate(params: SendReasoningTextUpdateParams): Promise<void> {
   const { config, sessionId, taskId, messageId, text, append = true } = params;
@@ -166,8 +177,9 @@ export async function sendReasoningTextUpdate(params: SendReasoningTextUpdatePar
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
     kind: "artifact-update",
+    isNew: true,
     append,
-    lastChunk: true,
+    lastChunk: false,
     final: false,
     artifact: {
       artifactId: uuidv4(),
@@ -231,6 +243,7 @@ export async function sendStatusUpdate(params: SendStatusUpdateParams): Promise<
   const statusUpdate: A2ATaskStatusUpdateEvent = {
     taskId,
     kind: "status-update",
+    isNew: true,
     final: false, // Status updates should not end the stream
     status: {
       message: statusMessage,
@@ -346,6 +359,7 @@ export async function sendCommand(params: SendCommandParams): Promise<void> {
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
     kind: "artifact-update",
+    isNew: true,
     append: false,
     lastChunk: true,
     final: params.final ?? false,
@@ -423,6 +437,7 @@ export async function sendCard(params: SendCardParams): Promise<void> {
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
     kind: "artifact-update",
+    isNew: true,
     append: false,
     lastChunk: true,
     final: params.final ?? false,
@@ -528,6 +543,7 @@ export async function sendReference(params: SendReferenceParams): Promise<void> 
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
     kind: "artifact-update",
+    isNew: true,
     append: false,
     lastChunk: true,
     final: params.final ?? false,
@@ -668,6 +684,7 @@ export async function sendTriggerResponse(params: SendTriggerResponseParams): Pr
     result: {
       taskId: taskId,
       kind: "artifact-update",
+      isNew: true,
       append: false,
       lastChunk: true,
       final: true,

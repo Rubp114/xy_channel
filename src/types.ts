@@ -70,11 +70,13 @@ export type A2AMessagePart = A2ATextPart | A2AFilePart | A2ADataPart;
 
 export interface A2ATextPart {
   kind: "text";
+  /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
   text: string;
 }
 
 export interface A2AFilePart {
   kind: "file";
+  /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
   file: {
     name: string;
     mimeType: string;
@@ -84,6 +86,7 @@ export interface A2AFilePart {
 
 export interface A2ADataPart {
   kind: "data";
+  /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
   data: {
     event?: A2ADataEvent;
     [key: string]: any;
@@ -128,8 +131,16 @@ export interface SentFileCard {
 export interface A2ATaskArtifactUpdateEvent {
   taskId: string;
   kind: "artifact-update";
+  /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
+  isNew: boolean;
   append: boolean;
+  /**
+   * 标识一段流式文本是否结束：模型本轮 turn 的文本输出完成时为 true，
+   * 流式进行中的中间帧为 false。
+   */
   lastChunk: boolean;
+  /** 本轮 turn 文本流的独立标识（uuidv4），turn 内所有文本帧共享，turn 结束后更换。 */
+  streamTextId?: string;
   final: boolean;
   artifact: A2AArtifact;
 }
@@ -141,6 +152,7 @@ export interface A2AArtifact {
 
 export interface A2AReasoningTextPart {
   kind: "reasoningText";
+  /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
   reasoningText: string;
 }
 
@@ -148,6 +160,7 @@ export type A2AArtifactPart = A2ATextPart | A2ADataPart | A2ACommandPart | A2ARe
 
 export interface A2ACommandPart {
   kind: "command";
+  /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
   command: A2ACommand;
 }
 
@@ -162,12 +175,15 @@ export interface A2ACommand {
 export interface A2ATaskStatusUpdateEvent {
   taskId: string;
   kind: "status-update";
+  /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
+  isNew: boolean;
   final: boolean;
   status: {
     message: {
       role: "agent";
       parts: Array<{
         kind: "text";
+        /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
         text: string;
       }>;
     };
