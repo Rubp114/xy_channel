@@ -12,6 +12,7 @@
 
 import { randomUUID } from "crypto";
 import { logger } from "../utils/logger.js";
+import { releaseStreamTextId } from "../utils/stream-text-id.js";
 import { sendStatusUpdate, sendA2AResponse } from "../formatter.js";
 import type { XYChannelConfig } from "../types.js";
 import {
@@ -60,6 +61,10 @@ export function getSession(sessionId: string): ConversationSession | null {
 export function deleteSession(sessionId: string): void {
   const session = sessions.get(sessionId);
   session?.outboundQueue.destroy();
+  // 会话销毁：释放其任务链上所有 turn 的 streamTextId
+  for (const entry of session?.tasks ?? []) {
+    releaseStreamTextId(entry.taskId);
+  }
   sessions.delete(sessionId);
 }
 
@@ -97,6 +102,7 @@ export function registerTask(sessionId: string, taskId: string, messageId: strin
 
 /**
  * 移除 session 的活跃 taskId（消息处理完成时调用）。
+ * 同时释放该 task 对应 turn 的 streamTextId（本轮文本流已结束）。
  * @param expectedTaskId 可选：精确移除指定的 taskId，而非清空整个任务链。
  */
 export function completeTask(sessionId: string, expectedTaskId?: string): void {
@@ -105,6 +111,9 @@ export function completeTask(sessionId: string, expectedTaskId?: string): void {
 
   if (!expectedTaskId) {
     logger.log(`[TASK_MANAGER] Removing taskId`);
+    for (const entry of session.tasks) {
+      releaseStreamTextId(entry.taskId);
+    }
     session.tasks = [];
     return;
   }
@@ -116,6 +125,7 @@ export function completeTask(sessionId: string, expectedTaskId?: string): void {
     return;
   }
   session.tasks = nextTasks;
+  releaseStreamTextId(expectedTaskId);
   if (nextTasks.length > 0) {
     logger.log(`[TASK_MANAGER] Removed taskId ${expectedTaskId}, restored current taskId ${nextTasks[nextTasks.length - 1].taskId}`);
   } else {

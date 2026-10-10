@@ -42,6 +42,7 @@ const DEBUG_COMMANDS: A2ACommand[] = [
       isStart: true,
       isFinal: false,
       reasoningText: "用户想生成一个美国国债报告。这是一个研究/调研报告类任务。让我看看可用的技能。",
+      streamingText: "",
       streamingTextId: "11111111111111111111",
     }
   },
@@ -51,6 +52,7 @@ const DEBUG_COMMANDS: A2ACommand[] = [
       isStart: false,
       isFinal: true,
       reasoningText: "用户想生成一个美国国债报告。这是一个研究/调研报告类任务。让我看看可用的技能。",
+      streamingText: "",
       streamingTextId: "11111111111111111111",
     }
   },

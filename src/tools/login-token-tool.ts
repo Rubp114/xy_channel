@@ -55,6 +55,7 @@ const { clientId, skillName } = params;
     const artifact = {
       taskId,
       kind: "artifact-update",
+      isNew: true,
       append: false,
       lastChunk: true,
       final: false,

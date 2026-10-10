@@ -305,6 +305,7 @@ export const xyOutbound: ChannelOutboundAdapter = {
       id: taskId,
       result: {
         kind: "artifact-update",
+        isNew: true,
         append: true,
         lastChunk: false,
         final: false,
