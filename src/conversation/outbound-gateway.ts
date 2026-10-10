@@ -79,8 +79,8 @@ export async function sendWsFrame(params: SendWsFrameParams): Promise<void> {
 //       log.log(`[A2A-OUT] commands=${JSON.stringify(commands)}`);
 //     }
 //   }
-//   await wsManager.sendMessage(sessionId, outboundMessage);
-// }
+  await wsManager.sendMessage(sessionId, outboundMessage);
+}
 
 // ─── HTTP push 发送 ───────────────────────────────────────────
 
