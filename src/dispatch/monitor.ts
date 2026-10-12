@@ -16,7 +16,6 @@ import { handleCronQueryEvent } from "../cron-query-handler.js";
 import { handleMemoryQueryEvent } from "../memory-query-handler.js";
 import { handleUpdateTaskConvIdEvent } from "../update-task-conv-id-handler.js";
 import { cleanupStaleTempFiles } from "./reply-dispatcher.js";
-import { maybeSendDebugCommands } from "../debug-commands.js";
 import { logger } from "../utils/logger.js";
 
 export type MonitorXYOpts = {
@@ -115,9 +114,6 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
 
       // ✅ Report health: received a message
       trackEvent?.();
-
-      // 🐛 DEBUG：收到任意 A2A 消息即下行固定 command（src/debug-commands.ts 里填）
-      maybeSendDebugCommands(message, cfg);
 
       // Check for duplicate message handling
       if (activeMessages.has(messageKey)) {

@@ -1,4 +1,4 @@
-// step-info-tool — 工具执行步骤信息 + 技能使用通知（before/after_tool_call 钩子）
+// step-info-tool — 工具执行步骤信息 + 任务卡片（before/after_tool_call 钩子）
 //
 // 两个能力合并在本模块（原 skill-tool 已并入）：
 //
@@ -8,20 +8,31 @@
 //        成功 → success=true，result=执行结果
 //        失败 → success=false，result=报错信息
 //    - displayName 按分类映射（网页搜索/运行命令/文件创建/编辑文件/读取文件/
-//      查找文件/分析图片/生成图片/生成音乐/生成视频/下载文件/使用工具）
+//      查找文件/分析图片/生成图片/生成音乐/生成视频/下载文件）
+//    - 「使用工具」白名单（update_plan/canvas/tool_search 等）不走 StepInfo，见 2)
 //
-// 2) 技能命令（namespace=Common, name=Skill）：模型 cd 进技能目录或读
-//    技能 SKILL.md 时下发，payload={ skillName, text }
-//    - cd 进技能目录 → text=使用技能 <skillName>
-//    - 读 SKILL.md    → text=查看技能 <skillName>（同命令内 cd+读 md 判为查看）
-//    - 合并去重：read 工具读 SKILL.md 时只发技能命令，不再发「读取文件」
-//      StepInfo；read 普通文件只发「读取文件」StepInfo。
-//    - exec 命令命中技能检测时，技能命令与「运行命令」StepInfo 并存。
+// 2) 任务卡片命令（namespace=UserInteraction, name=DisplayTaskCardData）：
+//    payload={ index:1, isDisplayTaskCardData:true, isFinal:true, stepName,
+//              taskUniqId:toolCallId, taskUniqIndexId:1 }
+//    - 技能通知：模型 cd 进技能目录或读技能 SKILL.md 时下发
+//        cd 进技能目录 → stepName=使用技能 <skillName>
+//        读 SKILL.md    → stepName=查看技能 <skillName>（同命令内 cd+读 md 判为查看）
+//        合并去重：read 工具读 SKILL.md 时只发技能卡片，不再发「读取文件」
+//        StepInfo；read 普通文件只发「读取文件」StepInfo。
+//        exec 命令命中技能检测时，技能卡片与「运行命令」StepInfo 并存。
+//    - 「使用工具」白名单工具：只在调用前下发一次卡片（stepName=displayName），
+//      after 不再下发 tool_result 状态帧。
+//    - update_plan 计划步骤：除「使用工具」卡片外，plan 中 status=in_progress
+//      的步骤也各下发一张卡片（stepName=步骤文本，taskUniqId=toolCallId-plan-N
+//      与同次调用的「使用工具」卡片区分）。
 //
 // 仅下发分类内工具；未映射工具（cron、sessions_* 系列、subagents、
 // memory_* 系列、tts 等其余 general 工具与全部端工具）静默跳过。
 // 命令经 formatter.sendCommand 下发，路由与 channel 其它命令一致：
 // 普通对话 WS、cron run push 通道。
+//
+// 状态更新帧（tool-status-hook 的「调用工具：xxx」status-update）不在本模块，
+// 保持不变。
 //
 // 钩子体全 try/catch：before_tool_call 抛错会 block 工具执行，
 // 命令下发失败绝不能影响工具本身。
@@ -56,6 +67,9 @@ const MAX_FIELD_LENGTH = 8000;
  * general 白名单外（cron、gateway、nodes、message、heartbeat_respond、
  * sessions_* 系列、subagents、session_status、memory_* 系列、tts）
  * 与全部端工具不下发命令。
+ *
+ * displayName="使用工具" 的白名单工具不下发 StepInfo，改为下发
+ * DisplayTaskCardData 任务卡片（见 TASK_CARD_TOOLS）。
  */
 const DISPLAY_BY_TOOL: Record<string, string> = {
   // Web
@@ -94,6 +108,15 @@ const DISPLAY_BY_TOOL: Record<string, string> = {
   send_file_to_user: "使用工具",
   canvas: "使用工具",
 };
+
+/**
+ * 「使用工具」白名单工具集合（DISPLAY_BY_TOOL 中 displayName="使用工具" 的项）。
+ * 这类工具不下发 StepInfo 状态帧，改为 before_tool_call 时下发一次
+ * DisplayTaskCardData 任务卡片（stepName=displayName），after 不再补 tool_result。
+ */
+const TASK_CARD_TOOLS: Set<string> = new Set(
+  Object.keys(DISPLAY_BY_TOOL).filter((t) => DISPLAY_BY_TOOL[t] === "使用工具"),
+);
 
 /**
  * 把工具参数/结果转成命令可携带的 JSON 安全字段。
@@ -195,6 +218,25 @@ function shouldSkipStepInfo(event: { toolName?: string; params?: Record<string, 
   return classifyReadPath(event.params?.path)?.kind === "skill";
 }
 
+/**
+ * 提取 update_plan 参数中 in_progress 状态的步骤文本。
+ * openclaw update_plan schema：{ explanation?, plan: [{ step, status }] }，
+ * status ∈ pending/in_progress/completed，且工具侧校验至多一个 in_progress
+ * （这里仍做防御性遍历，schema 放宽后也能全部下发）。
+ */
+function extractInProgressPlanSteps(params: Record<string, unknown> | undefined): string[] {
+  const plan = params?.plan;
+  if (!Array.isArray(plan)) return [];
+  const steps: string[] = [];
+  for (const entry of plan) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    if (e.status !== "in_progress") continue;
+    if (typeof e.step === "string" && e.step.trim().length > 0) steps.push(e.step);
+  }
+  return steps;
+}
+
 // ── 下发目标解析 ───────────────────────────────────────────────────
 
 /** 解析下发目标会话上下文：主会话 binding → ALS → cron 合成 ctx → 放弃。 */
@@ -290,26 +332,29 @@ async function sendStepInfo(params: {
   });
 }
 
-/** 下发一条技能命令（Common/Skill，payload={ skillName, text }）。 */
-async function sendSkillCommand(params: {
+/** 下发一条任务卡片命令（UserInteraction/DisplayTaskCardData）。
+ *  payload 中 index/taskUniqIndexId 固定 1，taskUniqId 默认取 toolCallId（每次工具调用
+ *  唯一，与 debug 示例中每张卡片 taskUniqId 递增的模式一致；同一次调用下发多张卡片时
+ *  调用方需显式传入不同的 taskUniqId 区分），stepName 为卡片展示的步骤名。 */
+async function sendDisplayTaskCard(params: {
   config: XYChannelConfig;
   sessionId: string;
   taskId: string;
   messageId: string;
   toolCallId?: string;
-  action: "view" | "use";
-  skillName: string;
+  /** 覆盖 taskUniqId（默认 toolCallId）；同一次工具调用下发多张卡片时必须区分。 */
+  taskUniqId?: string;
+  stepName: string;
 }): Promise<void> {
-  const text =
-    params.action === "view"
-      ? `查看技能 ${params.skillName}`
-      : `使用技能 ${params.skillName}`;
-
   const command: A2ACommand = {
-    header: { namespace: "Common", name: "Skill" },
+    header: { namespace: "UserInteraction", name: "DisplayTaskCardData" },
     payload: {
-      skillName: params.skillName,
-      text,
+      index: 1,
+      isDisplayTaskCardData: true,
+      isFinal: true,
+      stepName: params.stepName,
+      taskUniqId: params.taskUniqId ?? params.toolCallId ?? "",
+      taskUniqIndexId: 1,
     },
   };
 
@@ -328,33 +373,74 @@ async function sendSkillCommand(params: {
  * Call during `registrationMode === "full"` in the plugin entry point.
  */
 export function registerStepInfoHook(api: OpenClawPluginApi): void {
-  // 工具执行前：技能命令 + StepInfo(tool_call, arguments)
+  // 工具执行前：技能任务卡片 + StepInfo(tool_call, arguments) / 使用工具任务卡片
   api.on("before_tool_call", async (event, ctx) => {
     try {
       const sendCtx = resolveSendContext(event, ctx);
       if (!sendCtx) return;
 
-      // 1. 技能命令（cd 进技能目录 / 读 SKILL.md）
+      // 1. 技能任务卡片（cd 进技能目录 / 读 SKILL.md）
       const skillAction = detectSkillAction(event);
       if (skillAction) {
-        await sendSkillCommand({
+        const stepName =
+          skillAction.action === "view"
+            ? `查看技能 ${skillAction.skillName}`
+            : `使用技能 ${skillAction.skillName}`;
+        await sendDisplayTaskCard({
           ...sendCtx,
           toolCallId: event.toolCallId,
-          action: skillAction.action,
-          skillName: skillAction.skillName,
+          stepName,
         });
         logger.log(
-          `${LOG_TAG} sent skill ${skillAction.action} skill=${skillAction.skillName}`,
+          `${LOG_TAG} sent skill task card action=${skillAction.action} skill=${skillAction.skillName}`,
         );
       }
 
-      // 2. StepInfo（read 技能 SKILL.md 时只走技能命令，跳过读取文件）
+      // 2. StepInfo（read 技能 SKILL.md 时只走技能卡片，跳过读取文件）
       if (shouldSkipStepInfo(event)) {
         logger.log(`${LOG_TAG} skip StepInfo: read skill SKILL.md, tool=${event.toolName}`);
         return;
       }
       const displayName = DISPLAY_BY_TOOL[event.toolName];
       if (!displayName) return;
+
+      // update_plan 追加全量入参日志，便于排查计划下发内容
+      if (event.toolName === "update_plan") {
+        logger.log(
+          `${LOG_TAG} update_plan 调用入参 toolCallId=${event.toolCallId ?? ""}:`,
+          event.params,
+        );
+      }
+
+      // 3. 使用工具类：只在调用前下发一次任务卡片（stepName=displayName），
+      //    不下发 StepInfo，after 侧也不补 tool_result 帧
+      if (TASK_CARD_TOOLS.has(event.toolName)) {
+        await sendDisplayTaskCard({
+          ...sendCtx,
+          toolCallId: event.toolCallId,
+          stepName: displayName,
+        });
+        logger.log(
+          `${LOG_TAG} sent tool task card tool=${event.toolName} stepName=${displayName}`,
+        );
+
+        // update_plan：plan 中 in_progress 状态的步骤也各下发一张卡片，
+        // stepName=步骤文本；taskUniqId 加 -plan-N 后缀与上面的「使用工具」
+        // 卡片区分（设备按 taskUniqId 标识卡片）
+        if (event.toolName === "update_plan") {
+          const planSteps = extractInProgressPlanSteps(event.params);
+          for (const [i, stepText] of planSteps.entries()) {
+            await sendDisplayTaskCard({
+              ...sendCtx,
+              toolCallId: event.toolCallId,
+              taskUniqId: `${event.toolCallId ?? ""}-plan-${i}`,
+              stepName: stepText,
+            });
+            logger.log(`${LOG_TAG} sent plan step card step="${stepText}"`);
+          }
+        }
+        return;
+      }
 
       await sendStepInfo({
         ...sendCtx,
@@ -366,21 +452,13 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
       });
 
       logger.log(`${LOG_TAG} sent tool_call tool=${event.toolName} display=${displayName}`);
-
-      // update_plan 追加全量入参日志，便于排查计划下发内容
-      if (event.toolName === "update_plan") {
-        logger.log(
-          `${LOG_TAG} update_plan 调用入参 toolCallId=${event.toolCallId ?? ""}:`,
-          event.params,
-        );
-      }
     } catch (err) {
       // 命令下发失败绝不能 block 工具执行
       logger.error(`${LOG_TAG} before_tool_call hook failed:`, err);
     }
   });
 
-  // 工具执行后：StepInfo(tool_result, success + result)
+  // 工具执行后：StepInfo(tool_result, success + result)；使用工具类不下发
   api.on("after_tool_call", async (event, ctx) => {
     try {
       // read 技能 SKILL.md 的 result 也不发 StepInfo（与 before 侧去重对齐）
@@ -388,17 +466,28 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
       const displayName = DISPLAY_BY_TOOL[event.toolName];
       if (!displayName) return;
 
-      const sendCtx = resolveSendContext(event, ctx);
-      if (!sendCtx) {
-        logger.log(`${LOG_TAG} skip tool_result: no send context, tool=${event.toolName}`);
-        return;
-      }
-
       // 成功 → success=true + 执行结果；失败 → success=false + 报错信息
       const failed = event.error !== undefined && event.error !== null;
       const rawResult = failed
         ? (typeof event.error === "string" ? event.error : JSON.stringify(event.error))
         : event.result;
+
+      // update_plan 追加全量出参日志（成功为执行结果，失败为报错信息）
+      if (event.toolName === "update_plan") {
+        logger.log(
+          `${LOG_TAG} update_plan 实际输出 toolCallId=${event.toolCallId ?? ""} success=${!failed}:`,
+          rawResult,
+        );
+      }
+
+      // 使用工具类只在调用前下发一次任务卡片，不下发 tool_result 状态帧
+      if (TASK_CARD_TOOLS.has(event.toolName)) return;
+
+      const sendCtx = resolveSendContext(event, ctx);
+      if (!sendCtx) {
+        logger.log(`${LOG_TAG} skip tool_result: no send context, tool=${event.toolName}`);
+        return;
+      }
 
       await sendStepInfo({
         ...sendCtx,
@@ -413,14 +502,6 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
       logger.log(
         `${LOG_TAG} sent tool_result tool=${event.toolName} display=${displayName} success=${!failed}`,
       );
-
-      // update_plan 追加全量出参日志（成功为执行结果，失败为报错信息）
-      if (event.toolName === "update_plan") {
-        logger.log(
-          `${LOG_TAG} update_plan 实际输出 toolCallId=${event.toolCallId ?? ""} success=${!failed}:`,
-          rawResult,
-        );
-      }
     } catch (err) {
       logger.error(`${LOG_TAG} after_tool_call hook failed:`, err);
     }
