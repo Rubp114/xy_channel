@@ -366,6 +366,14 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
       });
 
       logger.log(`${LOG_TAG} sent tool_call tool=${event.toolName} display=${displayName}`);
+
+      // update_plan 追加全量入参日志，便于排查计划下发内容
+      if (event.toolName === "update_plan") {
+        logger.log(
+          `${LOG_TAG} update_plan 调用入参 toolCallId=${event.toolCallId ?? ""}:`,
+          event.params,
+        );
+      }
     } catch (err) {
       // 命令下发失败绝不能 block 工具执行
       logger.error(`${LOG_TAG} before_tool_call hook failed:`, err);
@@ -405,6 +413,14 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
       logger.log(
         `${LOG_TAG} sent tool_result tool=${event.toolName} display=${displayName} success=${!failed}`,
       );
+
+      // update_plan 追加全量出参日志（成功为执行结果，失败为报错信息）
+      if (event.toolName === "update_plan") {
+        logger.log(
+          `${LOG_TAG} update_plan 实际输出 toolCallId=${event.toolCallId ?? ""} success=${!failed}:`,
+          rawResult,
+        );
+      }
     } catch (err) {
       logger.error(`${LOG_TAG} after_tool_call hook failed:`, err);
     }
