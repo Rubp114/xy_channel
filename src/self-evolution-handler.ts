@@ -138,6 +138,7 @@ export async function handleSelfEvolutionStateGetEvent(
       result: {
         taskId,
         kind: "artifact-update",
+        isNew: true,
         append: false,
         lastChunk: true,
         final: true,
