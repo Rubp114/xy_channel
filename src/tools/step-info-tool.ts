@@ -7,6 +7,8 @@
 //    - after_tool_call  → eventType="tool_result"，携带 success + result：
 //        成功 → success=true，result=执行结果
 //        失败 → success=false，result=报错信息
+//    - 每次 StepInfo 命令发出后轮换本 turn 的 streamTextId（见
+//      utils/stream-text-id），使命令前后的流式文本使用不同 id 分段
 //    - displayName 按分类映射（网页搜索/运行命令/文件创建/编辑文件/读取文件/
 //      查找文件/分析图片/生成图片/生成音乐/生成视频/下载文件）
 //    - 「使用工具」白名单（update_plan/canvas/tool_search 等）不走 StepInfo，见 2)
@@ -49,6 +51,7 @@ import {
   getCronToolRunInfo,
 } from "./session-manager.js";
 import { logger } from "../utils/logger.js";
+import { rotateStreamTextId } from "../utils/stream-text-id.js";
 import type { A2ACommand, XYChannelConfig } from "../types.js";
 
 const LOG_TAG = "[STEP-INFO]";
@@ -330,6 +333,14 @@ async function sendStepInfo(params: {
     command,
     toolCallId: params.toolCallId,
   });
+
+  // StepInfo 是 turn 内的文本分段边界：命令发出后轮换 streamTextId，
+  // 保证其后的文本帧与命令之前的文本帧使用不同的 streamTextId
+  // （端侧按 streamTextId 聚合流式文本段）。
+  const newStreamTextId = rotateStreamTextId(params.taskId);
+  logger.log(
+    `${LOG_TAG} rotated streamTextId taskId=${params.taskId} eventType=${params.eventType} newId=${newStreamTextId}`,
+  );
 }
 
 /** 下发一条任务卡片命令（UserInteraction/DisplayTaskCardData）。

@@ -83,7 +83,8 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   // Build artifact update event
   // lastChunk 标识本轮 turn 的文本流是否结束：终帧（final=true）为 true，
   // 流式进行中的中间帧为 false。streamTextId 为本轮 turn 文本流的独立标识，
-  // turn 内所有文本帧共享，turn 结束后（final 帧发出）释放，下轮更换新 id。
+  // 同一分段内所有文本帧共享；turn 内 StepInfo 命令下发后会轮换新 id
+  // （见 step-info-tool），turn 结束后（final 帧发出）释放，下轮更换新 id。
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
     kind: "artifact-update",
