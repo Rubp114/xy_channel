@@ -7,8 +7,9 @@
 //    - after_tool_call  → eventType="tool_result"，携带 success + result：
 //        成功 → success=true，result=执行结果
 //        失败 → success=false，result=报错信息
-//    - 每次 StepInfo 命令发出后轮换本 turn 的 streamingTextId（见
-//      utils/streaming-text-id），使命令前后的流式文本使用不同 id 分段
+//    - 每次 StepInfo 命令发出后轮换本 turn 的 streamingTextId 并切分流式
+//      装配器（conversation-manager.rotateStreamingTextSegment）：命令前后
+//      的流式文本使用不同 id 分段，且新 id 帧不叠加旧段文本
 //    - displayName 按分类映射（网页搜索/运行命令/文件创建/编辑文件/读取文件/
 //      查找文件/分析图片/生成图片/生成音乐/生成视频/下载文件）
 //    - 「使用工具」白名单（update_plan/canvas/tool_search 等）不走 StepInfo，见 2)
@@ -44,6 +45,7 @@ import { sendCommand } from "../formatter.js";
 import {
   resolveBySessionKey,
   getCachedXYConfig,
+  rotateStreamingTextSegment,
 } from "../conversation/conversation-manager.js";
 import {
   getCurrentSessionContext,
@@ -51,7 +53,6 @@ import {
   getCronToolRunInfo,
 } from "./session-manager.js";
 import { logger } from "../utils/logger.js";
-import { rotateStreamingTextId } from "../utils/streaming-text-id.js";
 import type { A2ACommand, XYChannelConfig } from "../types.js";
 
 const LOG_TAG = "[STEP-INFO]";
@@ -334,10 +335,16 @@ async function sendStepInfo(params: {
     toolCallId: params.toolCallId,
   });
 
-  // StepInfo 是 turn 内的文本分段边界：命令发出后轮换 streamingTextId，
-  // 保证其后的文本帧与命令之前的文本帧使用不同的 streamingTextId
-  // （端侧按 streamingTextId 聚合流式文本段）。
-  const newStreamingTextId = rotateStreamingTextId(params.taskId);
+  // StepInfo 是 turn 内的文本分段边界：命令发出后先以旧 id 补发旧段完整
+  // 文本（rotateStreamingTextSegment 内部 flush + 等队列排空），再轮换
+  // streamingTextId 并切分流式装配器 —— 其后的文本帧使用新 id，且只携带
+  // 边界后新段的文本，不再叠加旧 id 段内容（端侧按 id 聚合流式文本段）。
+  const newStreamingTextId = await rotateStreamingTextSegment({
+    config: params.config,
+    sessionId: params.sessionId,
+    taskId: params.taskId,
+    messageId: params.messageId,
+  });
   logger.log(
     `${LOG_TAG} rotated streamingTextId taskId=${params.taskId} eventType=${params.eventType} newId=${newStreamingTextId}`,
   );
