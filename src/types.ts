@@ -140,7 +140,7 @@ export interface A2ATaskArtifactUpdateEvent {
    */
   lastChunk: boolean;
   /** 本轮 turn 文本流的独立标识（uuidv4），turn 内所有文本帧共享，turn 结束后更换。 */
-  streamTextId?: string;
+  streamingTextId?: string;
   final: boolean;
   artifact: A2AArtifact;
 }

@@ -2,7 +2,7 @@
 // 纯 A2A 帧构建器：只负责组帧，最后一跳统一走 conversation/outbound-gateway。
 import { v4 as uuidv4 } from "uuid";
 import { sendWsFrame } from "./conversation/outbound-gateway.js";
-import { getOrCreateStreamTextId, releaseStreamTextId } from "./utils/stream-text-id.js";
+import { getOrCreateStreamingTextId, releaseStreamingTextId } from "./utils/streaming-text-id.js";
 import { logger } from "./utils/logger.js";
 import { redactSensitiveText, containsSensitiveInfo } from "./sensitive-redactor.js";
 import { rewriteOutboundApprovalText } from "./approval-bridge.js";
@@ -82,7 +82,7 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
 
   // Build artifact update event
   // lastChunk 标识本轮 turn 的文本流是否结束：终帧（final=true）为 true，
-  // 流式进行中的中间帧为 false。streamTextId 为本轮 turn 文本流的独立标识，
+  // 流式进行中的中间帧为 false。streamingTextId 为本轮 turn 文本流的独立标识，
   // 同一分段内所有文本帧共享；turn 内 StepInfo 命令下发后会轮换新 id
   // （见 step-info-tool），turn 结束后（final 帧发出）释放，下轮更换新 id。
   const artifact: A2ATaskArtifactUpdateEvent = {
@@ -91,7 +91,7 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
     isNew: true,
     append,
     lastChunk: final,
-    streamTextId: getOrCreateStreamTextId(taskId),
+    streamingTextId: getOrCreateStreamingTextId(taskId),
     final,
     artifact: {
       artifactId: uuidv4(),
@@ -137,13 +137,13 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   // Send via WebSocket（经 outbound-gateway 收口）
   if (shouldLog) {
     const redactedText = redactSensitiveText(bridgedText ?? "");
-    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, lastChunk=${final}, streamTextId=${artifact.streamTextId}, text=${buildTextPreview(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
+    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, lastChunk=${final}, streamingTextId=${artifact.streamingTextId}, text=${buildTextPreview(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
   }
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
-  // 终帧（本轮 turn 文本输出完成）发出后释放 streamTextId，下轮 turn 生成新 id
+  // 终帧（本轮 turn 文本输出完成）发出后释放 streamingTextId，下轮 turn 生成新 id
   if (final) {
-    releaseStreamTextId(taskId);
+    releaseStreamingTextId(taskId);
   }
   if (shouldLog) {
     log.log(`[A2A_RESPONSE] Message sent successfully`);
