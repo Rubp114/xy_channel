@@ -681,10 +681,14 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
           await prevChain;
 
           // assembler 内部完成 startsWith 边界检测与跨调用锁存（含轮间换行）
-          const { fullText } = assembler.onStreamText(text);
+          assembler.onStreamText(text);
           const partialTaskId = getActiveTaskId();
           const partialMessageId = getActiveMessageId();
 
+          // 🔑 帧文本在 drain 时惰性读取装配器，而非入队时捕获快照：
+          // 帧在队期间若发生分段边界（StepInfo 命令下发 → 轮换
+          // streamingTextId + cutSegment），发送时只携带边界后新段的文本，
+          // 杜绝在新 streamingTextId 下叠加下发旧 id 段内容。
           outboundQueue.enqueue({
             taskId: partialTaskId,
             label: "partial",
@@ -695,7 +699,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 sessionId,
                 taskId: partialTaskId,
                 messageId: partialMessageId,
-                text: fullText,
+                text: assembler.getFullText(),
                 append: false,
                 final: false,
                 log: false,

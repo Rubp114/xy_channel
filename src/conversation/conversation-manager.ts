@@ -12,7 +12,7 @@
 
 import { randomUUID } from "crypto";
 import { logger } from "../utils/logger.js";
-import { releaseStreamingTextId } from "../utils/streaming-text-id.js";
+import { releaseStreamingTextId, rotateStreamingTextId } from "../utils/streaming-text-id.js";
 import { sendStatusUpdate, sendA2AResponse } from "../formatter.js";
 import type { XYChannelConfig } from "../types.js";
 import {
@@ -138,6 +138,52 @@ export function getCurrentTask(sessionId: string): TaskEntry | null {
   const session = sessions.get(sessionId);
   if (!session || session.tasks.length === 0) return null;
   return session.tasks[session.tasks.length - 1];
+}
+
+/**
+ * 文本分段边界（StepInfo 等命令下发后调用），按序完成三个副作用：
+ *   1. 旧段收尾：装配器有内容时，以当前（旧）streamingTextId 经出站队列
+ *      补发一帧旧段完整全文本，并等队列排空 —— 保证旧 id 段的尾部完整
+ *      送达（在途 lazy partial 帧也在此期间以旧 id 发出）；
+ *   2. 轮换该 turn 的 streamingTextId —— 后续文本帧使用新 id；
+ *   3. 切分 session 的流式装配器 —— 后续 append:false 全量帧只携带边界
+ *      之后新段的文本，不再叠加旧 id 段内容。
+ * 返回新 streamingTextId。无装配器/无内容（cron 等无 dispatcher 场景、
+ * 或边界前尚无文本）时跳过收尾帧，仅轮换 id。
+ */
+export async function rotateStreamingTextSegment(params: {
+  config: XYChannelConfig;
+  sessionId: string;
+  taskId: string;
+  messageId: string;
+}): Promise<string> {
+  const { config, sessionId, taskId, messageId } = params;
+  const session = sessions.get(sessionId);
+  const assembler = session?.assembler;
+
+  if (session && assembler?.hasContent()) {
+    const oldSegmentText = assembler.getFullText();
+    session.outboundQueue.enqueue({
+      taskId,
+      label: "segment-flush",
+      coalesceKey: `partial:${taskId}`,
+      send: () =>
+        sendA2AResponse({
+          config,
+          sessionId,
+          taskId,
+          messageId,
+          text: oldSegmentText,
+          append: false,
+          final: false,
+        }),
+    });
+    await session.outboundQueue.whenIdle();
+  }
+
+  const newId = rotateStreamingTextId(taskId);
+  assembler?.cutSegment();
+  return newId;
 }
 
 /** 获取 session 当前活跃 taskId（reply-dispatcher 跨链读取 / 工具富化用）。 */
