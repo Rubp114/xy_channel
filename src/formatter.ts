@@ -388,7 +388,7 @@ export async function sendCommand(params: SendCommandParams): Promise<void> {
   };
 
   // Log complete response body
-  log.log(`[A2A_COMMAND] Sending command`);
+  log.log(`[A2A_COMMAND] Sending command: ${commands.map((c) => `${c.header?.namespace}/${c.header?.name}`).join(",")}`);
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
   log.log(`[A2A_COMMAND] Command sent successfully`);
 }

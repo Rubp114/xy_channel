@@ -163,6 +163,9 @@ export async function rotateStreamingTextSegment(params: {
 
   if (session && assembler?.hasContent()) {
     const oldSegmentText = assembler.getFullText();
+    logger.log(
+      `[STREAM-SEGMENT] flush old segment: sessionId=${sessionId}, taskId=${taskId}, textLen=${oldSegmentText.length}`,
+    );
     session.outboundQueue.enqueue({
       taskId,
       label: "segment-flush",
@@ -179,10 +182,16 @@ export async function rotateStreamingTextSegment(params: {
         }),
     });
     await session.outboundQueue.whenIdle();
+    logger.log(`[STREAM-SEGMENT] old segment flushed: taskId=${taskId}`);
+  } else {
+    logger.log(
+      `[STREAM-SEGMENT] skip flush (no session or no content): sessionId=${sessionId}, taskId=${taskId}, hasSession=${Boolean(session)}, hasContent=${assembler?.hasContent() ?? false}`,
+    );
   }
 
   const newId = rotateStreamingTextId(taskId);
   assembler?.cutSegment();
+  logger.log(`[STREAM-SEGMENT] rotated + assembler cut: taskId=${taskId}, newId=${newId}`);
   return newId;
 }
 

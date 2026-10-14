@@ -245,11 +245,14 @@ function extractInProgressPlanSteps(params: Record<string, unknown> | undefined)
 
 /** 解析下发目标会话上下文：主会话 binding → ALS → cron 合成 ctx → 放弃。 */
 function resolveSendContext(
-  event: { toolCallId?: string },
+  event: { toolCallId?: string; toolName?: string },
   ctx: { sessionKey?: string },
 ): { config: XYChannelConfig; sessionId: string; taskId: string; messageId: string } | null {
+  const sessionKey = ctx.sessionKey ?? "";
+  const toolCallId = event.toolCallId ?? "";
+
   // 1. 主会话对话路径：sessionKey → A2A binding（与 tool-status-hook 一致）
-  const binding = resolveBySessionKey(ctx.sessionKey ?? "");
+  const binding = resolveBySessionKey(sessionKey);
   if (binding) {
     const cached = getCachedXYConfig();
     const config = (cached as XYChannelConfig) ?? null;
@@ -279,8 +282,6 @@ function resolveSendContext(
   //    其它 before_tool_call 钩子的标记时序）或 toolCallId 已被 cron 检测
   //    钩子标记时，按 call-device-tool 同款方式构造合成 ctx（"cron-" 前缀
   //    使 sendCommand 路由到 push 通道）
-  const sessionKey = ctx.sessionKey ?? "";
-  const toolCallId = event.toolCallId ?? "";
   if (sessionKey.includes("cron:") || isCronToolCall(toolCallId)) {
     const runInfo = getCronToolRunInfo(toolCallId);
     const cached = getCachedXYConfig();
@@ -295,6 +296,14 @@ function resolveSendContext(
     }
   }
 
+  // 诊断：三条路径均未命中时命令会静默丢弃，打全各分支判定依据
+  logger.log(
+    `${LOG_TAG} no send context, command will be dropped: tool=${event.toolName ?? ""} ` +
+      `sessionKey=${sessionKey || "(empty)"} toolCallId=${toolCallId} ` +
+      `binding=${binding ? "hit" : "miss"} bindingConfig=${binding ? Boolean(getCachedXYConfig()) : "-"} ` +
+      `alsSession=${alsCtx?.sessionId ?? "(none)"} ` +
+      `cronKeyHit=${sessionKey.includes("cron:")} cronMarked=${isCronToolCall(toolCallId)}`,
+  );
   return null;
 }
 
@@ -394,6 +403,9 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
   // 工具执行前：技能任务卡片 + StepInfo(tool_call, arguments) / 使用工具任务卡片
   api.on("before_tool_call", async (event, ctx) => {
     try {
+      logger.log(
+        `${LOG_TAG} before_tool_call tool=${event.toolName} toolCallId=${event.toolCallId ?? ""} sessionKey=${ctx.sessionKey ?? ""}`,
+      );
       const sendCtx = resolveSendContext(event, ctx);
       if (!sendCtx) return;
 
@@ -420,8 +432,10 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
         return;
       }
       const displayName = DISPLAY_BY_TOOL[event.toolName];
-      if (!displayName) return;
-
+      if (!displayName) {
+        logger.log(`${LOG_TAG} skip: tool not in display map, tool=${event.toolName}`);
+        return;
+      }
       // update_plan 追加全量入参日志，便于排查计划下发内容
       if (event.toolName === "update_plan") {
         logger.log(
@@ -479,10 +493,19 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
   // 工具执行后：StepInfo(tool_result, success + result)；使用工具类不下发
   api.on("after_tool_call", async (event, ctx) => {
     try {
+      logger.log(
+        `${LOG_TAG} after_tool_call tool=${event.toolName} toolCallId=${event.toolCallId ?? ""}`,
+      );
       // read 技能 SKILL.md 的 result 也不发 StepInfo（与 before 侧去重对齐）
-      if (shouldSkipStepInfo(event)) return;
+      if (shouldSkipStepInfo(event)) {
+        logger.log(`${LOG_TAG} skip tool_result: read skill SKILL.md, tool=${event.toolName}`);
+        return;
+      }
       const displayName = DISPLAY_BY_TOOL[event.toolName];
-      if (!displayName) return;
+      if (!displayName) {
+        logger.log(`${LOG_TAG} skip tool_result: tool not in display map, tool=${event.toolName}`);
+        return;
+      }
 
       // 成功 → success=true + 执行结果；失败 → success=false + 报错信息
       const failed = event.error !== undefined && event.error !== null;
@@ -499,7 +522,10 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
       }
 
       // 使用工具类只在调用前下发一次任务卡片，不下发 tool_result 状态帧
-      if (TASK_CARD_TOOLS.has(event.toolName)) return;
+      if (TASK_CARD_TOOLS.has(event.toolName)) {
+        logger.log(`${LOG_TAG} skip tool_result: task-card tool, card sent at before, tool=${event.toolName}`);
+        return;
+      }
 
       const sendCtx = resolveSendContext(event, ctx);
       if (!sendCtx) {
