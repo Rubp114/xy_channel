@@ -1,4 +1,4 @@
-// Copy this dependency-free helper (and its .d.mts) into the Xiaoyi plugin.
+// Dependency-free bridge to the optional Kit transport plugin.
 // The host remains the sole registrar of xiaoyiprovider.
 const PROVIDER = 'xiaoyiprovider';
 const PLUGIN = 'deepdiver-pangu-transport';
@@ -24,9 +24,10 @@ function bridgeEntry(entries) {
   for (const [id, value] of Object.entries(entries)) {
     if (id.trim() !== PLUGIN) continue;
     if (!value || typeof value !== 'object' || Array.isArray(value)) { entry = {}; continue; }
+    const fields = value as Record<string, unknown>;
     entry = {
-      enabled: typeof value.enabled === 'boolean' ? value.enabled : entry?.enabled,
-      config: 'config' in value ? value.config : entry?.config,
+      enabled: typeof fields.enabled === 'boolean' ? fields.enabled : entry?.enabled,
+      config: 'config' in fields ? fields.config : entry?.config,
     };
   }
   return entry;
@@ -64,10 +65,18 @@ function bridgeFor(ctx, getConfig) {
   return { create, normalize };
 }
 
+export interface KitXiaoyiProviderBridgeOptions {
+  /** Fallback only when the hook context has no config. Return the current host config. */
+  getConfig?: () => unknown;
+}
+
 /** Compose the host provider without registering it or changing its config.
  * ctx.config takes precedence over the optional registration-time fallback.
  * Hooks are synchronous, as required by the OpenClaw provider API. */
-export function createKitXiaoyiProvider(provider, { getConfig } = {}) {
+export function createKitXiaoyiProvider<T extends { id: string }>(
+  provider: T,
+  { getConfig }: KitXiaoyiProviderBridgeOptions = {},
+): T {
   if (!provider || typeof provider !== 'object') fail('a provider object is required.');
   if (getConfig !== undefined && typeof getConfig !== 'function') fail('getConfig must be a function.');
   if (provider.id !== PROVIDER) return provider;

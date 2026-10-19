@@ -10,8 +10,7 @@
 import { createHash } from "crypto";
 import { logger } from "./utils/logger.js";
 import type { ProviderPlugin } from "openclaw/plugin-sdk/provider-model-shared";
-// DEEPDIVER_XIAOYI_PROVIDER_SOURCE_BRIDGE_V1 baseline=4dbc8c4dd7eb3972dd0449deb0aba53f946e636760f31fabad2413f85485f02f
-import { createKitXiaoyiProvider } from "./kit/xiaoyi-provider-bridge.mjs";
+import { createKitXiaoyiProvider } from "./kit/xiaoyi-provider-bridge.js";
 import { getCurrentSessionContext, setCurrentCronJobId, markCronDetected } from "./tools/session-manager.js";
 import { notifyCronDetected } from "./conversation/cron-buffer.js";
 import { selfEvolutionManager } from "./utils/self-evolution-manager.js";
