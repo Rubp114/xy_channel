@@ -16,7 +16,8 @@
     "openclaw.plugin.json"
   ],
   "scripts": {
-    "build": "node ./node_modules/typescript/bin/tsc"
+    "build": "node ./node_modules/typescript/bin/tsc --noEmitOnError && node ./script/copy-runtime-assets.mjs",
+    "test:kit-bridge": "npm run build && node --test test/*.test.mjs"
   },
   "keywords": [
     "openclaw",
