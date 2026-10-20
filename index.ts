@@ -43,27 +43,16 @@ import { logger, setA2AOutLogEnabled } from "./src/utils/logger.js";
 const A2A_OUT_LOG_ENABLED = true;
 setA2AOutLogEnabled(A2A_OUT_LOG_ENABLED);
 
-/**
- * Parse a file path string to detect if it refers to a SKILL.md file within
- * a skills directory. Returns the skill name (parent directory) if so.
- *
- * Matches paths like:
- *   ~/.openclaw/workspace/skills/my-skill/SKILL.md
- *   /home/user/core_skills/my-skill/SKILL.md
- *   skills/my-skill/SKILL.md
- */
-function extractSkillNameFromPath(filePath: unknown): string | null {
-  if (typeof filePath !== "string" || !filePath) return null;
-  // Normalize common path prefixes
-  const normalized = filePath.replace(/^~\//, "/home/").replace(/\\/g, "/");
-  // Match: .../skills/<skillName>/SKILL.md  or  .../skills/<skillName>/...
-  // Also match: .../core_skills/<skillName>/SKILL.md
-  const match = normalized.match(/\/(?:core_)?skills\/([^/]+)\/SKILL\.md$/i);
-  return match ? match[1] : null;
+/** 从路径/文本中提取技能名：.../skills/<name> 或 .../core_skills/<name>。
+ *  与 pc 链路 stepinfo 的提取逻辑一致（dm 仓库 step-info-tool.ts 同款正则）。 */
+function extractSkillNameFromPathText(text: string): string | null {
+  const normalized = text.replace(/\\/g, "/");
+  const m = normalized.match(/(?:^|[/\s"';&|])(?:core_)?skills\/([^/'"\s;&|]+)/i);
+  return m ? m[1] : null;
 }
 
 /**
- * Register the skills diagnostic event listener via after_tool_call hook.
+ * Register the skills usage logging hook via before_tool_call.
  *
  * Detection paths (no dedup — N uses within one turn produce N lines):
  *  1. read 工具读技能 md 文件：
@@ -490,82 +479,18 @@ function registerCronRecoveryHook(api: OpenClawPluginApi): void {
   });
 }
 
-// ── Cron lifecycle observation: cron_changed hook ──────────────────────────
+// ── Cron lifecycle: cron_changed hook ──────────────────────────────────────
 
 /**
  * Register the cron_changed hook.
  *
  * openclaw 的 gateway 在 cron 任务生命周期变化（added/updated/removed/
- * started/finished）时发射该钩子，事件载荷为 PluginHookCronChangedEvent，
- * ctx 为 PluginHookGatewayContext（实际只注入 config 与 getCron 两个字段，
- * 不含 port/workspaceDir）。
- *
- * 这里注册一个观察处理器：把钩子内能拿到的全量上下文序列化成一行日志
- * （event 全量 + ctx 键名 + ctx.config 全量 + ctx.getCron() 服务快照），
- * 写入 /tmp/openclaw/xiaoyi-channel-<日期>.log，用于排查外部唤醒调度器
- * 同步、任务对账等问题。getCron() 返回的是 gateway 活实例，list() 结果
- * 只作日志快照，到期判断与执行仍以 openclaw 自身为准。
+ * started/finished）时发射该钩子。这里只保留任务变更云端同步；执行结果
+ * 打点由 registerCronRunLogHook（cron-YYYYMMDD.log）承担，全量上下文
+ * dump 日志已移除（过于啰嗦，排查价值被精简打点覆盖）。
  */
 function registerCronChangedHook(api: OpenClawPluginApi): void {
-  api.on("cron_changed", async (event, ctx) => {
-    const logTag = "[XY-CRON-CHANGED]";
-
-    // 防御性序列化：容忍 bigint、循环引用与不可序列化值，保证单行输出不炸
-    const safeJson = (value: unknown): string => {
-      const seen = new WeakSet();
-      try {
-        return JSON.stringify(value, (_key, v) => {
-          if (typeof v === "bigint") return `${v}n`;
-          if (typeof v === "object" && v !== null) {
-            if (seen.has(v)) return "[Circular]";
-            seen.add(v);
-          }
-          return v;
-        });
-      } catch (err) {
-        return `[unserializable: ${err instanceof Error ? err.message : String(err)}]`;
-      }
-    };
-
-    // getCron() 服务快照：方法名 + 当前任务列表（仅取对账所需关键字段）
-    let cronSnapshot: unknown = null;
-    const cronService = ctx?.getCron?.();
-    if (cronService) {
-      const methods = Object.keys(cronService);
-      try {
-        const jobs = await cronService.list();
-        cronSnapshot = {
-          methods,
-          jobCount: jobs.length,
-          jobs: jobs.map((job) => ({
-            id: job.id,
-            name: job.name,
-            agentId: job.agentId,
-            enabled: job.enabled,
-            nextRunAtMs: job.state?.nextRunAtMs,
-            lastRunStatus: job.state?.lastRunStatus,
-          })),
-        };
-      } catch (err) {
-        cronSnapshot = {
-          methods,
-          listError: err instanceof Error ? err.message : String(err),
-        };
-      }
-    }
-
-    // 一行日志输出全量上下文
-    logger.log(
-      `${logTag} ${safeJson({
-        event,
-        ctx: {
-          ctxKeys: Object.keys(ctx ?? {}),
-          config: ctx?.config,
-          getCron: cronSnapshot,
-        },
-      })}`,
-    );
-
+  api.on("cron_changed", async (event, _ctx) => {
     // 任务变更同步到云端（added/updated/removed/finished；内部全 try/catch）
     await syncScheduledTaskOnCronChanged(event);
   });
@@ -788,7 +713,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       registerCLIHook(api);
       // Cron recovery hook: prunes stale cron-push-map and pushData on gateway startup
       registerCronRecoveryHook(api);
-      // Cron lifecycle observation hook: logs full cron_changed context in one line
+      // Cron lifecycle hook: sync scheduled-task changes to cloud on cron_changed
       registerCronChangedHook(api);
       // Cron run log hook: write one line per finished cron run to /tmp/openclaw/cron-*.log
       registerCronRunLogHook(api);
