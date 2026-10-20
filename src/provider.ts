@@ -10,6 +10,7 @@
 import { createHash } from "crypto";
 import { logger } from "./utils/logger.js";
 import type { ProviderPlugin } from "openclaw/plugin-sdk/provider-model-shared";
+import { createKitXiaoyiProvider } from "./kit/xiaoyi-provider-bridge.js";
 import { getCurrentSessionContext, setCurrentCronJobId, markCronDetected } from "./tools/session-manager.js";
 import { notifyCronDetected } from "./conversation/cron-buffer.js";
 import { selfEvolutionManager } from "./utils/self-evolution-manager.js";
@@ -693,7 +694,7 @@ function extractA2AFromConversationInfo(text: string): { taskId: string; deviceT
   return { taskId: parts[1], deviceType: parts[2] };
 }
 
-export const xiaoyiProvider: ProviderPlugin = {
+export const xiaoyiProvider: ProviderPlugin = createKitXiaoyiProvider<ProviderPlugin>({
   id: "xiaoyiprovider",
   label: "Xiaoyi Provider",
   docsPath: "/providers/models",
@@ -1139,4 +1140,4 @@ export const xiaoyiProvider: ProviderPlugin = {
       });
     };
   },
-};
+});
