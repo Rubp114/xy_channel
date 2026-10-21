@@ -666,7 +666,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       registerCronChangedHook(api);
       // Skills diagnostic hook: log skill usage (detected via SKILL.md reads)
       registerSkillsDiagnosticHook(api);
-      // Tool status hook: push 「调用工具：xxx」status-update frame on every tool call
+      // Tool status hook: push 「正在使用工具：xxx」status-update frame on every tool call
       registerToolStatusHook(api);
       // Step-info hook (skill usage merged in): push Common/StepInfo command on
       // every classified tool call/result (tool_call 带 arguments,

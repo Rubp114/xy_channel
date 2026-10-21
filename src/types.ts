@@ -130,6 +130,13 @@ export interface SentFileCard {
 
 export interface A2ATaskArtifactUpdateEvent {
   taskId: string;
+  /** 任务统一标识，取 taskId 同值（A2A 链路统一下发字段）。 */
+  taskUniqId: string;
+  /**
+   * 当前时刻最后进入出栈队列的工具状态卡（DisplayExecuteStatusCard）的序号，
+   * 端侧据此把这段流式文本显示在序号一致的卡片下方；本 turn 未发过卡片时为 0。
+   */
+  taskUniqIndexId: number;
   kind: "artifact-update";
   /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
   isNew: boolean;
@@ -141,6 +148,11 @@ export interface A2ATaskArtifactUpdateEvent {
   lastChunk: boolean;
   /** 本轮 turn 文本流的独立标识（uuidv4），turn 内所有文本帧共享，turn 结束后更换。 */
   streamingTextId?: string;
+  /**
+   * 当前 turn 的 reasoning 内容是否已结束，默认 false；
+   * reasoning 结束（onReasoningEnd）后置 true，turn 内新一轮 reasoning 流开始时复位。
+   */
+  isReasoningFinished: boolean;
   final: boolean;
   artifact: A2AArtifact;
 }

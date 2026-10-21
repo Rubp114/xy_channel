@@ -21,6 +21,7 @@ import {
   deliverSubagentFinalResult,
 } from "../conversation/conversation-manager.js";
 import { StreamAssembler } from "../conversation/stream-assembler.js";
+import { markReasoningFinished, markReasoningStreaming } from "../utils/reasoning-state.js";
 
 // ⚙️ 前缀是 openclaw 系统消息稳定标记（infra/system-message.ts SYSTEM_MARK）。
 // ACP 绑定会话 turn 结束会以 kind=final 尾随投递系统诊断通知（如
@@ -643,6 +644,9 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
         try {
           if (text.length > 0) {
             const reasoningTaskId = getActiveTaskId();
+            // 新一轮 reasoning 流开始：复位 turn 级 isReasoningFinished
+            // （同一 turn 可能有多个 reasoning 块：思考→工具→再思考）。
+            markReasoningStreaming(reasoningTaskId);
             outboundQueue.enqueue({
               taskId: reasoningTaskId,
               label: "reasoning-stream",
@@ -659,6 +663,35 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
           }
         } catch (err) {
           scopedLog().error(`[REASONING-STREAM] Failed to send reasoning text:`, err);
+        }
+      },
+
+      onReasoningEnd: async () => {
+        // SDK thinking_end：标记本 turn reasoning 结束，并补发一帧空 reasoningText
+        // 标记帧（isReasoningFinished=true，显式 pin 而非 lazy 读状态表，防止
+        // 帧在队期间新一轮 reasoning 复位状态导致标记帧丢失语义），让端侧及时
+        // 收起思维链面板；空文本 + append:true 对端侧已有内容无副作用。
+        const endTaskId = getActiveTaskId();
+        markReasoningFinished(endTaskId);
+        scopedLog().log(`[REASONING-END] Reasoning finished, taskId=${endTaskId}`);
+
+        try {
+          outboundQueue.enqueue({
+            taskId: endTaskId,
+            label: "reasoning-end",
+            send: () =>
+              sendReasoningTextUpdate({
+                config,
+                sessionId,
+                taskId: endTaskId,
+                messageId: getActiveMessageId(),
+                text: "",
+                append: true,
+                isReasoningFinished: true,
+              }),
+          });
+        } catch (err) {
+          scopedLog().error(`[REASONING-END] Failed to send reasoning-end marker:`, err);
         }
       },
 

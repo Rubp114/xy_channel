@@ -3,6 +3,8 @@
 import { v4 as uuidv4 } from "uuid";
 import { sendWsFrame } from "./conversation/outbound-gateway.js";
 import { getOrCreateStreamingTextId, releaseStreamingTextId } from "./utils/streaming-text-id.js";
+import { isReasoningFinished as readReasoningFinished, releaseReasoningState } from "./utils/reasoning-state.js";
+import { releaseStatusCardSeq, getCurrentStatusCardSeq } from "./utils/status-card-seq.js";
 import { logger } from "./utils/logger.js";
 import { redactSensitiveText, containsSensitiveInfo } from "./sensitive-redactor.js";
 import { rewriteOutboundApprovalText } from "./approval-bridge.js";
@@ -87,11 +89,14 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   // （见 step-info-tool），turn 结束后（final 帧发出）释放，下轮更换新 id。
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
+    taskUniqId: taskId,
+    taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
     isNew: true,
     append,
     lastChunk: final,
     streamingTextId: getOrCreateStreamingTextId(taskId),
+    isReasoningFinished: readReasoningFinished(taskId),
     final,
     artifact: {
       artifactId: uuidv4(),
@@ -137,13 +142,17 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   // Send via WebSocket（经 outbound-gateway 收口）
   if (shouldLog) {
     const redactedText = redactSensitiveText(bridgedText ?? "");
-    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, lastChunk=${final}, streamingTextId=${artifact.streamingTextId}, text=${buildTextPreview(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
+    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, lastChunk=${final}, streamingTextId=${artifact.streamingTextId}, taskUniqIndexId=${artifact.taskUniqIndexId}, isReasoningFinished=${artifact.isReasoningFinished}, text=${buildTextPreview(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
   }
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
-  // 终帧（本轮 turn 文本输出完成）发出后释放 streamingTextId，下轮 turn 生成新 id
+  // 终帧（本轮 turn 文本输出完成）发出后释放 streamingTextId、reasoning 状态与
+  // 状态卡序号：下轮 turn 生成新 id、reasoning 状态复位为默认 false、
+  // taskUniqIndexId 重新从 1 开始
   if (final) {
     releaseStreamingTextId(taskId);
+    releaseReasoningState(taskId);
+    releaseStatusCardSeq(taskId);
   }
   if (shouldLog) {
     log.log(`[A2A_RESPONSE] Message sent successfully`);
@@ -160,6 +169,8 @@ export interface SendReasoningTextUpdateParams {
   messageId: string;
   text: string;
   append?: boolean; // defaults to true
+  /** 显式覆盖 isReasoningFinished（reasoning 结束标记帧传 true）；缺省读 turn 级状态表。 */
+  isReasoningFinished?: boolean;
 }
 
 /**
@@ -167,6 +178,7 @@ export interface SendReasoningTextUpdateParams {
  * Used for onToolStart, onToolResult, onReasoningStream, onReasoningEnd, onPartialReply.
  * append=true, final=false, lastChunk=false（思维链为流式中间帧，非 turn 文本完成标记）,
  * text is suffixed with newline for markdown rendering.
+ * reasoningText 与正文 text 禁止同帧携带：本函数只组 reasoningText part。
  */
 export async function sendReasoningTextUpdate(params: SendReasoningTextUpdateParams): Promise<void> {
   const { config, sessionId, taskId, messageId, text, append = true } = params;
@@ -177,11 +189,14 @@ export async function sendReasoningTextUpdate(params: SendReasoningTextUpdatePar
 
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
+    taskUniqId: taskId,
+    taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
     isNew: true,
     append,
     lastChunk: false,
     final: false,
+    isReasoningFinished: params.isReasoningFinished ?? readReasoningFinished(taskId),
     artifact: {
       artifactId: uuidv4(),
       parts: [
@@ -359,11 +374,14 @@ export async function sendCommand(params: SendCommandParams): Promise<void> {
   // Wrap command in commands array as per protocol requirement
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
+    taskUniqId: taskId,
+    taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
     isNew: true,
     append: false,
     lastChunk: true,
     final: params.final ?? false,
+    isReasoningFinished: readReasoningFinished(taskId),
     artifact: {
       artifactId: uuidv4(),
       parts: [
@@ -437,11 +455,14 @@ export async function sendCard(params: SendCardParams): Promise<void> {
   // Build artifact update with cardsInfo as data
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
+    taskUniqId: taskId,
+    taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
     isNew: true,
     append: false,
     lastChunk: true,
     final: params.final ?? false,
+    isReasoningFinished: readReasoningFinished(taskId),
     artifact: {
       artifactId: uuidv4(),
       parts: [
@@ -543,11 +564,14 @@ export async function sendReference(params: SendReferenceParams): Promise<void> 
   // Build artifact update with reference as data
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
+    taskUniqId: taskId,
+    taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
     isNew: true,
     append: false,
     lastChunk: true,
     final: params.final ?? false,
+    isReasoningFinished: readReasoningFinished(taskId),
     artifact: {
       artifactId: uuidv4(),
       parts: [
@@ -684,11 +708,14 @@ export async function sendTriggerResponse(params: SendTriggerResponseParams): Pr
     id: messageId,
     result: {
       taskId: taskId,
+      taskUniqId: taskId,
+      taskUniqIndexId: getCurrentStatusCardSeq(taskId),
       kind: "artifact-update",
       isNew: true,
       append: false,
       lastChunk: true,
       final: true,
+      isReasoningFinished: readReasoningFinished(taskId),
       artifact: {
         artifactId: uuidv4(),
         parts: artifactParts,

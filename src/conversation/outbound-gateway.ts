@@ -36,31 +36,76 @@ function extractCommands(payload: Record<string, any>): A2ACommand[] {
 }
 
 /**
+ * 将混合携带 reasoningText 与 text 的 artifact-update 帧拆分为两帧
+ * （reasoning 帧在前、正文帧在后，保持原有相对时序）；非混合帧原样返回
+ * （单元素数组）。
+ *
+ * 协议约束：reasoningText 与正文 text 禁止同帧携带。当前上游组帧
+ * （formatter.sendA2AResponse / sendReasoningTextUpdate）天然分离两类 part，
+ * 本拆分是物理收口点的防御性兜底，命中说明上游出现了回归。
+ */
+function splitMixedReasoningFrames(payload: Record<string, any>): Array<Record<string, any>> {
+  const result = payload?.result;
+  const parts = result?.artifact?.parts;
+  if (!Array.isArray(parts) || parts.length < 2) return [payload];
+  const hasReasoning = parts.some((p: any) => p?.kind === "reasoningText");
+  const hasText = parts.some((p: any) => p?.kind === "text");
+  if (!hasReasoning || !hasText) return [payload];
+
+  logger.warn(`[A2A-OUT] Mixed reasoningText+text frame detected, splitting into separate frames`);
+  const reasoningParts = parts.filter((p: any) => p?.kind === "reasoningText");
+  const otherParts = parts.filter((p: any) => p?.kind !== "reasoningText");
+  const reasoningFrame = {
+    ...payload,
+    result: {
+      ...result,
+      // reasoning 帧后面还跟着正文帧，不再是末帧
+      lastChunk: false,
+      final: false,
+      artifact: { ...result.artifact, parts: reasoningParts },
+    },
+  };
+  const textFrame = {
+    ...payload,
+    result: { ...result, artifact: { ...result.artifact, parts: otherParts } },
+  };
+  return [reasoningFrame, textFrame];
+}
+
+/**
  * 发送一帧 A2A agent_response 到 xy server。
  * 统一封装 OutboundWebSocketMessage 信封（msgType/agentId/hostname）。
  */
 export async function sendWsFrame(params: SendWsFrameParams): Promise<void> {
   const { config, sessionId, taskId, payload } = params;
   const wsManager = getXYWebSocketManager(config);
-  const outboundMessage: OutboundWebSocketMessage = {
-    msgType: "agent_response",
-    agentId: config.agentId,
-    sessionId,
-    taskId,
-    msgDetail: JSON.stringify({ ...payload, hostname: os.hostname() }),
-  };
-  // 完整出站 A2A 日志：信封摘要 + msgDetail 全量 + 内嵌 command 单独打印
-  // （内容字段已在组帧时脱敏，日志不会额外泄露敏感信息）
   const log = logger.withContext(sessionId, taskId);
-  log.log(
-    `[A2A-OUT] msgType=${outboundMessage.msgType}, agentId=${outboundMessage.agentId}, sessionId=${sessionId}, taskId=${taskId}, size=${outboundMessage.msgDetail.length}`,
-  );
-  log.log(`[A2A-OUT] msgDetail=${outboundMessage.msgDetail}`);
-  const commands = extractCommands(payload);
-  if (commands.length > 0) {
-    log.log(`[A2A-OUT] commands=${JSON.stringify(commands)}`);
+
+  for (const frame of splitMixedReasoningFrames(payload)) {
+    const outboundMessage: OutboundWebSocketMessage = {
+      msgType: "agent_response",
+      agentId: config.agentId,
+      sessionId,
+      taskId,
+      msgDetail: JSON.stringify({ ...frame, hostname: os.hostname() }),
+    };
+    // A2A 出站日志只打印终末帧（lastChunk=true 或 final=true）：信封摘要 +
+    // msgDetail 全量 + 内嵌 command 单独打印。流式中间帧（partial 文本、
+    // reasoning 流）不打印，避免高帧率刷屏。
+    // （内容字段已在组帧时脱敏，日志不会额外泄露敏感信息）
+    const result = frame?.result as Record<string, any> | undefined;
+    if (result?.lastChunk === true || result?.final === true) {
+      log.log(
+        `[A2A-OUT] msgType=${outboundMessage.msgType}, agentId=${outboundMessage.agentId}, sessionId=${sessionId}, taskId=${taskId}, size=${outboundMessage.msgDetail.length}`,
+      );
+      log.log(`[A2A-OUT] msgDetail=${outboundMessage.msgDetail}`);
+      const commands = extractCommands(frame);
+      if (commands.length > 0) {
+        log.log(`[A2A-OUT] commands=${JSON.stringify(commands)}`);
+      }
+    }
+    await wsManager.sendMessage(sessionId, outboundMessage);
   }
-  await wsManager.sendMessage(sessionId, outboundMessage);
 }
 
 // ─── HTTP push 发送 ───────────────────────────────────────────

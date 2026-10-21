@@ -14,20 +14,20 @@
 //      查找文件/分析图片/生成图片/生成音乐/生成视频/下载文件）
 //    - 「使用工具」白名单（update_plan/canvas/tool_search 等）不走 StepInfo，见 2)
 //
-// 2) 任务卡片命令（namespace=UserInteraction, name=DisplayTaskCardData）：
-//    payload={ index:1, isDisplayTaskCardData:true, isFinal:true, stepName,
-//              taskUniqId:toolCallId, taskUniqIndexId:1 }
+// 2) 执行状态卡命令（namespace=UserInteraction, name=DisplayExecuteStatusCard）：
+//    payload={ text, isFinal:true, taskUniqId:taskId,
+//              taskUniqIndexId:本轮对话内状态卡序号(按taskId从1递增) }
 //    - 技能通知：模型 cd 进技能目录或读技能 SKILL.md 时下发
-//        cd 进技能目录 → stepName=使用技能 <skillName>
-//        读 SKILL.md    → stepName=查看技能 <skillName>（同命令内 cd+读 md 判为查看）
+//        cd 进技能目录 → text=使用技能 <skillName>
+//        读 SKILL.md    → text=查看技能 <skillName>（同命令内 cd+读 md 判为查看）
 //        合并去重：read 工具读 SKILL.md 时只发技能卡片，不再发「读取文件」
 //        StepInfo；read 普通文件只发「读取文件」StepInfo。
 //        exec 命令命中技能检测时，技能卡片与「运行命令」StepInfo 并存。
-//    - 「使用工具」白名单工具：只在调用前下发一次卡片（stepName=displayName），
+//    - 「使用工具」白名单工具：只在调用前下发一次卡片（text=displayName），
 //      after 不再下发 tool_result 状态帧。
 //    - update_plan 计划步骤：除「使用工具」卡片外，plan 中 status=in_progress
-//      的步骤也各下发一张卡片（stepName=步骤文本，taskUniqId=toolCallId-plan-N
-//      与同次调用的「使用工具」卡片区分）。
+//      的步骤也各下发一张卡片（text=步骤文本，同轮多张卡片由
+//      taskUniqIndexId 序号区分）。
 //
 // 仅下发分类内工具；未映射工具（cron、sessions_* 系列、subagents、
 // memory_* 系列、tts 等其余 general 工具与全部端工具）静默跳过。
@@ -53,6 +53,7 @@ import {
   getCronToolRunInfo,
 } from "./session-manager.js";
 import { logger } from "../utils/logger.js";
+import { nextStatusCardSeq } from "../utils/status-card-seq.js";
 import type { A2ACommand, XYChannelConfig } from "../types.js";
 
 const LOG_TAG = "[STEP-INFO]";
@@ -73,7 +74,7 @@ const MAX_FIELD_LENGTH = 8000;
  * 与全部端工具不下发命令。
  *
  * displayName="使用工具" 的白名单工具不下发 StepInfo，改为下发
- * DisplayTaskCardData 任务卡片（见 TASK_CARD_TOOLS）。
+ * DisplayExecuteStatusCard 执行状态卡（见 TASK_CARD_TOOLS）。
  */
 const DISPLAY_BY_TOOL: Record<string, string> = {
   // Web
@@ -116,7 +117,7 @@ const DISPLAY_BY_TOOL: Record<string, string> = {
 /**
  * 「使用工具」白名单工具集合（DISPLAY_BY_TOOL 中 displayName="使用工具" 的项）。
  * 这类工具不下发 StepInfo 状态帧，改为 before_tool_call 时下发一次
- * DisplayTaskCardData 任务卡片（stepName=displayName），after 不再补 tool_result。
+ * DisplayExecuteStatusCard 执行状态卡（text=displayName），after 不再补 tool_result。
  */
 const TASK_CARD_TOOLS: Set<string> = new Set(
   Object.keys(DISPLAY_BY_TOOL).filter((t) => DISPLAY_BY_TOOL[t] === "使用工具"),
@@ -350,29 +351,29 @@ async function sendStepInfo(params: {
   );
 }
 
-/** 下发一条任务卡片命令（UserInteraction/DisplayTaskCardData）。
- *  payload 中 index/taskUniqIndexId 固定 1，taskUniqId 默认取 toolCallId（每次工具调用
- *  唯一，与 debug 示例中每张卡片 taskUniqId 递增的模式一致；同一次调用下发多张卡片时
- *  调用方需显式传入不同的 taskUniqId 区分），stepName 为卡片展示的步骤名。 */
-async function sendDisplayTaskCard(params: {
+/** 下发一条执行状态卡命令（UserInteraction/DisplayExecuteStatusCard）。
+ *  payload：text 为卡片展示文本；isFinal 默认 true；taskUniqId 取 taskId
+ *  （同轮对话内所有卡片相同）；taskUniqIndexId 为本轮对话（taskId）内发送
+ *  状态卡的序号，从 1 开始递增（见 utils/status-card-seq），同轮多张卡片
+ *  由序号区分。 */
+async function sendExecuteStatusCard(params: {
   config: XYChannelConfig;
   sessionId: string;
   taskId: string;
   messageId: string;
   toolCallId?: string;
-  /** 覆盖 taskUniqId（默认 toolCallId）；同一次工具调用下发多张卡片时必须区分。 */
-  taskUniqId?: string;
-  stepName: string;
+  /** 卡片展示文本（原 stepName 语义）。 */
+  text: string;
+  /** 默认 true。 */
+  isFinal?: boolean;
 }): Promise<void> {
   const command: A2ACommand = {
-    header: { namespace: "UserInteraction", name: "DisplayTaskCardData" },
+    header: { namespace: "UserInteraction", name: "DisplayExecuteStatusCard" },
     payload: {
-      index: 1,
-      isDisplayTaskCardData: true,
-      isFinal: true,
-      stepName: params.stepName,
-      taskUniqId: params.taskUniqId ?? params.toolCallId ?? "",
-      taskUniqIndexId: 1,
+      text: params.text,
+      isFinal: params.isFinal ?? true,
+      taskUniqId: params.taskId,
+      taskUniqIndexId: nextStatusCardSeq(params.taskId),
     },
   };
 
@@ -400,17 +401,17 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
       // 1. 技能任务卡片（cd 进技能目录 / 读 SKILL.md）
       const skillAction = detectSkillAction(event);
       if (skillAction) {
-        const stepName =
+        const cardText =
           skillAction.action === "view"
             ? `查看技能 ${skillAction.skillName}`
             : `使用技能 ${skillAction.skillName}`;
-        await sendDisplayTaskCard({
+        await sendExecuteStatusCard({
           ...sendCtx,
           toolCallId: event.toolCallId,
-          stepName,
+          text: cardText,
         });
         logger.log(
-          `${LOG_TAG} sent skill task card action=${skillAction.action} skill=${skillAction.skillName}`,
+          `${LOG_TAG} sent skill status card action=${skillAction.action} skill=${skillAction.skillName}`,
         );
       }
 
@@ -430,29 +431,28 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
         );
       }
 
-      // 3. 使用工具类：只在调用前下发一次任务卡片（stepName=displayName），
+      // 3. 使用工具类：只在调用前下发一次执行状态卡（text=displayName），
       //    不下发 StepInfo，after 侧也不补 tool_result 帧
       if (TASK_CARD_TOOLS.has(event.toolName)) {
-        await sendDisplayTaskCard({
+        await sendExecuteStatusCard({
           ...sendCtx,
           toolCallId: event.toolCallId,
-          stepName: displayName,
+          text: displayName,
         });
         logger.log(
-          `${LOG_TAG} sent tool task card tool=${event.toolName} stepName=${displayName}`,
+          `${LOG_TAG} sent tool status card tool=${event.toolName} text=${displayName}`,
         );
 
         // update_plan：plan 中 in_progress 状态的步骤也各下发一张卡片，
-        // stepName=步骤文本；taskUniqId 加 -plan-N 后缀与上面的「使用工具」
-        // 卡片区分（设备按 taskUniqId 标识卡片）
+        // text=步骤文本；同轮多张卡片由 taskUniqIndexId 序号区分
+        // （taskUniqId 同为 taskId）
         if (event.toolName === "update_plan") {
           const planSteps = extractInProgressPlanSteps(event.params);
-          for (const [i, stepText] of planSteps.entries()) {
-            await sendDisplayTaskCard({
+          for (const stepText of planSteps) {
+            await sendExecuteStatusCard({
               ...sendCtx,
               toolCallId: event.toolCallId,
-              taskUniqId: `${event.toolCallId ?? ""}-plan-${i}`,
-              stepName: stepText,
+              text: stepText,
             });
             logger.log(`${LOG_TAG} sent plan step card step="${stepText}"`);
           }

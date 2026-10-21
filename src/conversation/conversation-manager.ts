@@ -13,6 +13,7 @@
 import { randomUUID } from "crypto";
 import { logger } from "../utils/logger.js";
 import { releaseStreamingTextId, rotateStreamingTextId } from "../utils/streaming-text-id.js";
+import { releaseStatusCardSeq } from "../utils/status-card-seq.js";
 import { sendStatusUpdate, sendA2AResponse } from "../formatter.js";
 import type { XYChannelConfig } from "../types.js";
 import {
@@ -61,9 +62,10 @@ export function getSession(sessionId: string): ConversationSession | null {
 export function deleteSession(sessionId: string): void {
   const session = sessions.get(sessionId);
   session?.outboundQueue.destroy();
-  // 会话销毁：释放其任务链上所有 turn 的 streamingTextId
+  // 会话销毁：释放其任务链上所有 turn 的 streamingTextId 与状态卡序号
   for (const entry of session?.tasks ?? []) {
     releaseStreamingTextId(entry.taskId);
+    releaseStatusCardSeq(entry.taskId);
   }
   sessions.delete(sessionId);
 }
