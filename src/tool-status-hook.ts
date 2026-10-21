@@ -76,7 +76,7 @@ export function registerToolStatusHook(api: OpenClawPluginApi): void {
         sessionId: binding.sessionId,
         taskId,
         messageId,
-        text: `调用工具：${toolName}`,
+        text: `正在使用工具：${toolName}`,
         state: "working",
       });
     } catch (err) {
