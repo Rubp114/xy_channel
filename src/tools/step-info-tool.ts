@@ -17,6 +17,10 @@
 // 2) 执行状态卡命令（namespace=UserInteraction, name=DisplayExecuteStatusCard）：
 //    payload={ text, isFinal:true, taskUniqId:taskId,
 //              taskUniqIndexId:本轮对话内状态卡序号(按taskId从1递增) }
+//    每次下发时同步配对一张 DisplayTaskCardData（顺序在 statusCard 之前，
+//    index/taskUniqIndexId 取状态卡序号，stepName 取状态卡 text）；
+//    对话轮开始/结束时的 DisplayTaskCardData 起始卡与 final 卡见
+//    formatter.sendDisplayTaskCardData 的文档。
 //    - 技能通知：模型 cd 进技能目录或读技能 SKILL.md 时下发
 //        cd 进技能目录 → text=使用技能 <skillName>
 //        读 SKILL.md    → text=查看技能 <skillName>（同命令内 cd+读 md 判为查看）
@@ -41,7 +45,7 @@
 // 命令下发失败绝不能影响工具本身。
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { sendCommand } from "../formatter.js";
+import { sendCommand, sendDisplayTaskCardData } from "../formatter.js";
 import {
   resolveBySessionKey,
   getCachedXYConfig,
@@ -355,7 +359,9 @@ async function sendStepInfo(params: {
  *  payload：text 为卡片展示文本；isFinal 默认 true；taskUniqId 取 taskId
  *  （同轮对话内所有卡片相同）；taskUniqIndexId 为本轮对话（taskId）内发送
  *  状态卡的序号，从 1 开始递增（见 utils/status-card-seq），同轮多张卡片
- *  由序号区分。 */
+ *  由序号区分。
+ *  每次下发同步配对一张 DisplayTaskCardData（顺序在 statusCard 之前）：
+ *  index/taskUniqIndexId 取本卡序号，stepName 取本卡 text，isFinal=false。 */
 async function sendExecuteStatusCard(params: {
   config: XYChannelConfig;
   sessionId: string;
@@ -367,13 +373,27 @@ async function sendExecuteStatusCard(params: {
   /** 默认 true。 */
   isFinal?: boolean;
 }): Promise<void> {
+  const seq = nextStatusCardSeq(params.taskId);
+
+  // 配对卡先行：DisplayTaskCardData 的顺序必须在 statusCard 之前
+  await sendDisplayTaskCardData({
+    config: params.config,
+    sessionId: params.sessionId,
+    taskId: params.taskId,
+    messageId: params.messageId,
+    toolCallId: params.toolCallId,
+    index: seq,
+    stepName: params.text,
+    isFinal: false,
+  });
+
   const command: A2ACommand = {
     header: { namespace: "UserInteraction", name: "DisplayExecuteStatusCard" },
     payload: {
       text: params.text,
       isFinal: params.isFinal ?? true,
       taskUniqId: params.taskId,
-      taskUniqIndexId: nextStatusCardSeq(params.taskId),
+      taskUniqIndexId: seq,
     },
   };
 

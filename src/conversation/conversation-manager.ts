@@ -13,8 +13,8 @@
 import { randomUUID } from "crypto";
 import { logger } from "../utils/logger.js";
 import { releaseStreamingTextId, rotateStreamingTextId } from "../utils/streaming-text-id.js";
-import { releaseStatusCardSeq } from "../utils/status-card-seq.js";
-import { sendStatusUpdate, sendA2AResponse } from "../formatter.js";
+import { releaseStatusCardSeq, getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
+import { sendStatusUpdate, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
 import type { XYChannelConfig } from "../types.js";
 import {
   ConversationSession,
@@ -583,6 +583,18 @@ export async function deliverSubagentFinalResult(params: {
       text: "任务处理已完成~",
       state: "completed",
     });
+  // DisplayTaskCardData final 帧收尾对话轮（起始卡在 bot.ts 下发）；
+  // 必须排在 final 文本帧之前 —— 终态帧发出后服务端可能关闭本 turn。
+  const sendTaskCardFinal = () =>
+    sendDisplayTaskCardData({
+      config,
+      sessionId: state.sessionId,
+      taskId: effectiveTaskId,
+      messageId: effectiveMessageId,
+      index: Math.max(1, getCurrentStatusCardSeq(effectiveTaskId)),
+      stepName: "任务处理已完成",
+      isFinal: true,
+    });
   const sendFinal = () =>
     sendA2AResponse({
       config,
@@ -602,6 +614,11 @@ export async function deliverSubagentFinalResult(params: {
     });
     session.outboundQueue.enqueue({
       taskId: effectiveTaskId,
+      label: "subagent-task-card-final",
+      send: sendTaskCardFinal,
+    });
+    session.outboundQueue.enqueue({
+      taskId: effectiveTaskId,
       label: "subagent-final",
       delayMs: terminalFrameDelayMs,
       send: sendFinal,
@@ -609,6 +626,7 @@ export async function deliverSubagentFinalResult(params: {
     await session.outboundQueue.whenIdle();
   } else {
     await sendCompletedStatus();
+    await sendTaskCardFinal();
     await sendFinal();
   }
 

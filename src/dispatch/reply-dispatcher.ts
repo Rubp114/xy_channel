@@ -1,7 +1,7 @@
 // Reply dispatcher - completely following feishu/reply-dispatcher.ts pattern
 import type { ClawdbotConfig, RuntimeEnv, ReplyPayload } from "openclaw/plugin-sdk";
 import { getXYRuntime } from "../runtime.js";
-import { sendA2AResponse, sendStatusUpdate, sendReasoningTextUpdate, sendCommand } from "../formatter.js";
+import { sendA2AResponse, sendStatusUpdate, sendReasoningTextUpdate, sendCommand, sendDisplayTaskCardData } from "../formatter.js";
 import { resolveXYConfig } from "../config.js";
 import type { A2ACommand, RunCrossTaskContext, XYChannelConfig } from "../types.js";
 import { clearRunCrossTaskSentFiles, getCurrentSessionContext } from "../tools/session-manager.js";
@@ -22,6 +22,7 @@ import {
 } from "../conversation/conversation-manager.js";
 import { StreamAssembler } from "../conversation/stream-assembler.js";
 import { markReasoningFinished, markReasoningStreaming } from "../utils/reasoning-state.js";
+import { getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
 
 // ⚙️ 前缀是 openclaw 系统消息稳定标记（infra/system-message.ts SYSTEM_MARK）。
 // ACP 绑定会话 turn 结束会以 kind=final 尾随投递系统诊断通知（如
@@ -456,6 +457,25 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                   }),
               });
 
+              // 对话轮结束：DisplayTaskCardData final 帧收尾（起始卡在 bot.ts
+              // 下发；index 取当前状态卡序号，未发过卡时为 1 即收尾起始卡）。
+              // 必须排在 A2A 终态文本帧（final=true）之前 —— 终态帧发出后
+              // 服务端可能关闭本 turn，其后的帧不再可达。
+              outboundQueue.enqueue({
+                taskId: terminalTaskId,
+                label: "task-card-final",
+                send: () =>
+                  sendDisplayTaskCardData({
+                    config,
+                    sessionId,
+                    taskId: terminalTaskId,
+                    messageId: terminalMessageId,
+                    index: Math.max(1, getCurrentStatusCardSeq(terminalTaskId)),
+                    stepName: "任务处理已完成",
+                    isFinal: true,
+                  }),
+              });
+
               // 🔑 最终帧携带权威全文本（append:false 整体替换）—— 流式期间
               // 缺失的尾部在此补齐。空文本属异常路径，回退旧的空帧语义
               // （append:true 仅标记流结束），避免把客户端已展示内容刷空。
@@ -541,6 +561,23 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     messageId: failureMessageId,
                     text: "任务处理中断了~",
                     state: "failed",
+                  }),
+              });
+
+              // 失败收尾：同样下发 DisplayTaskCardData final 帧关闭起始卡，
+              // 否则端侧卡片会一直停留在"任务正在处理中"
+              outboundQueue.enqueue({
+                taskId: failureTaskId,
+                label: "task-card-final-failure",
+                send: () =>
+                  sendDisplayTaskCardData({
+                    config,
+                    sessionId,
+                    taskId: failureTaskId,
+                    messageId: failureMessageId,
+                    index: Math.max(1, getCurrentStatusCardSeq(failureTaskId)),
+                    stepName: "任务处理已完成",
+                    isFinal: true,
                   }),
               });
 

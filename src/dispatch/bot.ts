@@ -7,7 +7,7 @@ import { createXYReplyDispatcher } from "./reply-dispatcher.js";
 import { parseA2AMessage, extractTextFromParts, extractFileParts, extractPushId, extractDeviceType, extractAppVer, extractSdkApiVersion, extractModelName, extractTriggerData, extractRunCrossTaskContext, isClearContextMessage, isTasksCancelMessage } from "../parser.js";
 import { downloadFilesFromParts } from "../file-download.js";
 import { resolveXYConfig } from "../config.js";
-import { sendStatusUpdate, sendClearContextResponse, sendTasksCancelResponse, sendA2AResponse } from "../formatter.js";
+import { sendStatusUpdate, sendClearContextResponse, sendTasksCancelResponse, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
 import {
   appendSelfEvolutionKeywordNudge,
   shouldNudgeForSelfEvolutionKeyword,
@@ -31,6 +31,7 @@ import {
   markTurnInflight,
   clearTurnInflight,
   cacheXYConfig,
+  getOrCreateSession,
 } from "../conversation/conversation-manager.js";
 import type { A2AJsonRpcRequest } from "../types.js";
 import { logger } from "../utils/logger.js";
@@ -206,6 +207,29 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     // Resolve configuration (needed for status updates)
     const config = resolveXYConfig(cfg);
     cacheXYConfig(config);
+
+    // 对话轮开始：下发 DisplayTaskCardData 起始卡（index=1，任务正在处理中）。
+    // 走会话出站队列而非直发，排在上一 turn 可能在途的终态帧之后（steer 场景）；
+    // 配对卡的 final 帧由 reply-dispatcher / conversation-manager 在对话轮结束时下发。
+    {
+      const startSession = getOrCreateSession(parsed.sessionId);
+      const startTaskId = parsed.taskId;
+      const startMessageId = parsed.messageId;
+      startSession.outboundQueue.enqueue({
+        taskId: startTaskId,
+        label: "task-card-start",
+        send: () =>
+          sendDisplayTaskCardData({
+            config,
+            sessionId: parsed.sessionId,
+            taskId: startTaskId,
+            messageId: startMessageId,
+            index: 1,
+            stepName: "任务正在处理中",
+            isFinal: false,
+          }),
+      });
+    }
 
     // ✅ Resolve agent route (following feishu pattern)
     // accountId is "default" for XY (single account mode)

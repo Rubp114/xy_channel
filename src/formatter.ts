@@ -412,6 +412,58 @@ export async function sendCommand(params: SendCommandParams): Promise<void> {
 }
 
 /**
+ * Parameters for sending a DisplayTaskCardData task progress card.
+ */
+export interface SendDisplayTaskCardDataParams {
+  config: XYChannelConfig;
+  sessionId: string;
+  taskId: string;
+  messageId: string;
+  /** toolCallId from the tool's execute() — used for cron detection via hook-set Map. */
+  toolCallId?: string;
+  /** 卡片序号：配对场景取配套 DisplayExecuteStatusCard 的 taskUniqIndexId；对话轮起始卡固定 1。 */
+  index: number;
+  /** 卡片展示的步骤名（final 帧固定为"任务处理已完成"）。 */
+  stepName: string;
+  /** 当前对话轮结束时下发的 final 帧为 true，其余为 false。 */
+  isFinal: boolean;
+}
+
+/**
+ * 下发一条 DisplayTaskCardData 任务进度卡（UserInteraction 命名空间）。
+ *
+ * 三种下发时机：
+ *   1. 对话轮开始：index=1，stepName="任务正在处理中"，isFinal=false（bot.ts）；
+ *   2. 每次下发 DisplayExecuteStatusCard 时同步配对一张（顺序在本卡之后——
+ *      调用方须先调本函数再发 statusCard），index/taskUniqIndexId 取 statusCard
+ *      的 taskUniqIndexId，stepName 取其 text（step-info-tool.ts）；
+ *   3. 对话轮结束：isFinal=true，stepName="任务处理已完成"，index 取当前
+ *      状态卡序号（未发过卡时为 1，收尾起始卡）。
+ */
+export async function sendDisplayTaskCardData(params: SendDisplayTaskCardDataParams): Promise<void> {
+  const command: A2ACommand = {
+    header: { namespace: "UserInteraction", name: "DisplayTaskCardData" },
+    payload: {
+      index: params.index,
+      isDisplayTaskCardData: true,
+      isFinal: params.isFinal,
+      stepName: params.stepName,
+      taskUniqId: params.taskId,
+      taskUniqIndexId: params.index,
+    },
+  };
+
+  await sendCommand({
+    config: params.config,
+    sessionId: params.sessionId,
+    taskId: params.taskId,
+    messageId: params.messageId,
+    command,
+    toolCallId: params.toolCallId,
+  });
+}
+
+/**
  * Parameters for sending a card (e.g., HTML H5 card).
  */
 export interface SendCardParams {
