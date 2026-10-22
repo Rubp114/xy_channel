@@ -10,7 +10,7 @@
 //   - 权威文本修正：openclaw 在 message_end 发出的最终清洗文本不走
 //     onPartialReply，流式累计可能缺尾；deliver(kind=final) 提供 canonical
 //     文本，finalize() 时以它替换当前轮（或最后一个 model 段）。
-//   - 分段边界切分：StepInfo 命令下发、streamingTextId 轮换时 cutSegment()
+//   - 分段边界切分：工具调用边界、streamingTextId 轮换时 cutSegment()
 //     清空已装配内容，后续全量帧只携带边界后新段的文本（禁止新 id 叠加
 //     旧 id 段内容下发）。
 //   - 本类是纯逻辑，不做任何发送；发送由调用方经 outbound-queue 完成。
@@ -139,7 +139,7 @@ export class StreamAssembler {
   }
 
   /**
-   * 分段边界切分（StepInfo 命令下发、streamingTextId 轮换时调用）：
+   * 分段边界切分（工具调用边界、streamingTextId 轮换时调用）：
    * 已装配内容（含当前模型文本）全部移出全文本 —— 之后的
    * getFullText()/finalize() 只返回边界之后新段的文本，新 streamingTextId
    * 的文本帧不再叠加携带旧 id 段的内容。
