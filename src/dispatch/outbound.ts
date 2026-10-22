@@ -14,6 +14,7 @@ import {
 import { savePushData } from "../utils/pushdata-manager.js";
 import { isReasoningFinished as readReasoningFinished } from "../utils/reasoning-state.js";
 import { getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
+import { getOrCreateStreamingTextId } from "../utils/streaming-text-id.js";
 import { logger } from "../utils/logger.js";
 
 // Special marker for default push delivery when no target is specified
@@ -308,6 +309,7 @@ export const xyOutbound: ChannelOutboundAdapter = {
         taskUniqId: taskId,
         taskUniqIndexId: getCurrentStatusCardSeq(taskId),
         isReasoningFinished: readReasoningFinished(taskId),
+        streamingTextId: getOrCreateStreamingTextId(taskId),
         artifact: {
           artifactId: taskId,
           parts: [
