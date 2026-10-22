@@ -142,7 +142,7 @@ export const TOOL_STATUS_CARD_META: Record<string, { symbolName?: string; text?:
   write: { symbolName: "folder_badge_arrow_left", text: "文件写入" },
   edit: { symbolName: "doc_plaintext_and_pencil", text: "文件编辑" },
   bash: { symbolName: "code_square", text: "执行命令" },
-  exec: { symbolName: "wired_projection", text: "CLI工具" },
+  exec: { symbolName: "wired_projection", text: "执行命令" },
   invoke: { symbolName: "code_1", text: "API工具" },
   upload_file: { symbolName: "electric_install", text: "上传到远程设备" },
   send_file_to_user: { symbolName: "electric_install", text: "从远程设备下载" },
