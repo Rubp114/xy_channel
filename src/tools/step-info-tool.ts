@@ -58,6 +58,7 @@ import {
 } from "./session-manager.js";
 import { logger } from "../utils/logger.js";
 import { nextStatusCardSeq } from "../utils/status-card-seq.js";
+import { takePendingThinkIndex } from "../utils/think-index.js";
 import type { A2ACommand, XYChannelConfig } from "../types.js";
 
 const LOG_TAG = "[STEP-INFO]";
@@ -375,6 +376,11 @@ async function sendExecuteStatusCard(params: {
 }): Promise<void> {
   const seq = nextStatusCardSeq(params.taskId);
 
+  // 若本卡之前刚结束一个流文本块（lastChunk=true 的分段收尾帧 / reasoning
+  // 结束标记帧），本卡携带 thinkIndex=[该块的 taskUniqIndexId]（字符串数组）。
+  // take 语义：仅块结束后的第一张状态卡携带。
+  const pendingThinkIndex = takePendingThinkIndex(params.taskId);
+
   // 配对卡先行：DisplayTaskCardData 的顺序必须在 statusCard 之前
   await sendDisplayTaskCardData({
     config: params.config,
@@ -394,8 +400,12 @@ async function sendExecuteStatusCard(params: {
       isFinal: params.isFinal ?? true,
       taskUniqId: params.taskId,
       taskUniqIndexId: seq,
+      ...(pendingThinkIndex !== null ? { thinkIndex: [pendingThinkIndex] } : {}),
     },
   };
+  if (pendingThinkIndex !== null) {
+    logger.log(`${LOG_TAG} status card carries thinkIndex=["${pendingThinkIndex}"], taskUniqIndexId=${seq}`);
+  }
 
   await sendCommand({
     config: params.config,
