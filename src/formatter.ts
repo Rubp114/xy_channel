@@ -213,6 +213,7 @@ export async function sendReasoningTextUpdate(params: SendReasoningTextUpdatePar
     append,
     lastChunk: false,
     final: false,
+    streamingTextId: getOrCreateStreamingTextId(taskId),
     isReasoningFinished: params.isReasoningFinished ?? readReasoningFinished(taskId),
     artifact: {
       artifactId: uuidv4(),
@@ -399,6 +400,7 @@ export async function sendCommand(params: SendCommandParams): Promise<void> {
     append: false,
     lastChunk: true,
     final: params.final ?? false,
+    streamingTextId: getOrCreateStreamingTextId(taskId),
     isReasoningFinished: readReasoningFinished(taskId),
     artifact: {
       artifactId: uuidv4(),
@@ -529,6 +531,7 @@ export async function sendCard(params: SendCardParams): Promise<void> {
     append: false,
     lastChunk: true,
     final: params.final ?? false,
+    streamingTextId: getOrCreateStreamingTextId(taskId),
     isReasoningFinished: readReasoningFinished(taskId),
     artifact: {
       artifactId: uuidv4(),
@@ -638,6 +641,7 @@ export async function sendReference(params: SendReferenceParams): Promise<void> 
     append: false,
     lastChunk: true,
     final: params.final ?? false,
+    streamingTextId: getOrCreateStreamingTextId(taskId),
     isReasoningFinished: readReasoningFinished(taskId),
     artifact: {
       artifactId: uuidv4(),
@@ -782,6 +786,7 @@ export async function sendTriggerResponse(params: SendTriggerResponseParams): Pr
       append: false,
       lastChunk: true,
       final: true,
+      streamingTextId: getOrCreateStreamingTextId(taskId),
       isReasoningFinished: readReasoningFinished(taskId),
       artifact: {
         artifactId: uuidv4(),
@@ -796,5 +801,9 @@ export async function sendTriggerResponse(params: SendTriggerResponseParams): Pr
 
   log.log(`[TRIGGER_RESPONSE] Sending Trigger response, text=${buildTextPreview(redactedContent)}`);
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+  // Trigger 帧 final=true：与 sendA2AResponse 终帧同样释放本 turn 的状态
+  releaseStreamingTextId(taskId);
+  releaseReasoningState(taskId);
+  releaseStatusCardSeq(taskId);
   log.log(`[TRIGGER_RESPONSE] Trigger response sent successfully`);
 }
