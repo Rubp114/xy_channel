@@ -66,6 +66,13 @@ export interface SendA2AResponseParams {
   text?: string;
   append: boolean;
   final: boolean;
+  /**
+   * 标识当前流文本块是否结束（结束=true，可开始下一块）。缺省取 final：
+   * 只有正文/思考文本块结束时才允许为 true（正文终帧、分段收尾帧），
+   * 任何中间帧不得为 true。分段收尾（rotateStreamingTextSegment）场景
+   * 显式传 true。
+   */
+  lastChunk?: boolean;
   files?: Array<{ fileName: string; fileType: string; fileId: string }>;
   errorCode?: number | string; // 错误码，用于任务执行异常场景
   errorMessage?: string; // 错误描述
@@ -83,8 +90,9 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   const bridgedText = text === undefined ? text : rewriteOutboundApprovalText(sessionId, text);
 
   // Build artifact update event
-  // lastChunk 标识本轮 turn 的文本流是否结束：终帧（final=true）为 true，
-  // 流式进行中的中间帧为 false。streamingTextId 为本轮 turn 文本流的独立标识，
+  // lastChunk 标识当前流文本块是否结束（结束=true，可开始下一块）：仅正文
+  // 终帧（final=true）与分段收尾帧（显式传 true）允许为 true，流式进行中的
+  // 中间帧一律 false。streamingTextId 为本轮 turn 文本流的独立标识，
   // 同一分段内所有文本帧共享；turn 内 StepInfo 命令下发后会轮换新 id
   // （见 step-info-tool），turn 结束后（final 帧发出）释放，下轮更换新 id。
   const artifact: A2ATaskArtifactUpdateEvent = {
@@ -94,7 +102,7 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
     kind: "artifact-update",
     isNew: true,
     append,
-    lastChunk: final,
+    lastChunk: params.lastChunk ?? final,
     streamingTextId: getOrCreateStreamingTextId(taskId),
     isReasoningFinished: readReasoningFinished(taskId),
     final,
@@ -142,7 +150,7 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   // Send via WebSocket（经 outbound-gateway 收口）
   if (shouldLog) {
     const redactedText = redactSensitiveText(bridgedText ?? "");
-    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, lastChunk=${final}, streamingTextId=${artifact.streamingTextId}, taskUniqIndexId=${artifact.taskUniqIndexId}, isReasoningFinished=${artifact.isReasoningFinished}, text=${buildTextPreview(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
+    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, lastChunk=${artifact.lastChunk}, streamingTextId=${artifact.streamingTextId}, taskUniqIndexId=${artifact.taskUniqIndexId}, isReasoningFinished=${artifact.isReasoningFinished}, text=${buildTextPreview(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
   }
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
@@ -171,12 +179,16 @@ export interface SendReasoningTextUpdateParams {
   append?: boolean; // defaults to true
   /** 显式覆盖 isReasoningFinished（reasoning 结束标记帧传 true）；缺省读 turn 级状态表。 */
   isReasoningFinished?: boolean;
+  /** 标识当前流文本块是否结束。思维链流式中间帧一律 false；仅 reasoning
+   *  结束标记帧（onReasoningEnd）传 true。 */
+  lastChunk?: boolean;
 }
 
 /**
  * Send an A2A artifact-update with reasoningText part.
  * Used for onToolStart, onToolResult, onReasoningStream, onReasoningEnd, onPartialReply.
- * append=true, final=false, lastChunk=false（思维链为流式中间帧，非 turn 文本完成标记）,
+ * append=true, final=false, lastChunk=false（思维链流式中间帧，非文本块结束标记；
+ * reasoning 结束标记帧显式传 lastChunk=true）,
  * text is suffixed with newline for markdown rendering.
  * reasoningText 与正文 text 禁止同帧携带：本函数只组 reasoningText part。
  */
@@ -194,7 +206,7 @@ export async function sendReasoningTextUpdate(params: SendReasoningTextUpdatePar
     kind: "artifact-update",
     isNew: true,
     append,
-    lastChunk: false,
+    lastChunk: params.lastChunk ?? false,
     final: false,
     streamingTextId: getOrCreateStreamingTextId(taskId),
     isReasoningFinished: params.isReasoningFinished ?? readReasoningFinished(taskId),
@@ -295,6 +307,8 @@ export interface SendCommandParams {
   toolCallId?: string;
   /** When true, the artifact-update is sent with final=true. Default: false. */
   final?: boolean;
+  /** 标识当前流文本块是否结束。命令帧不携带文本、不是文本块终点，默认 false。 */
+  lastChunk?: boolean;
 }
 
 /**
@@ -373,6 +387,7 @@ export async function sendCommand(params: SendCommandParams): Promise<void> {
 
   // Build artifact update with command as data
   // Wrap command in commands array as per protocol requirement
+  // lastChunk 恒 false（命令帧不携带文本，不是文本块终点）
   const artifact: A2ATaskArtifactUpdateEvent = {
     taskId,
     taskUniqId: taskId,
@@ -380,7 +395,7 @@ export async function sendCommand(params: SendCommandParams): Promise<void> {
     kind: "artifact-update",
     isNew: true,
     append: false,
-    lastChunk: true,
+    lastChunk: params.lastChunk ?? false,
     final: params.final ?? false,
     streamingTextId: getOrCreateStreamingTextId(taskId),
     isReasoningFinished: readReasoningFinished(taskId),
@@ -477,6 +492,8 @@ export interface SendCardParams {
   toolCallId?: string;
   /** When true, the artifact-update is sent with final=true. Default: false. */
   final?: boolean;
+  /** 标识一段流式文本是否结束。卡片帧不是文本流终点，默认 false。 */
+  lastChunk?: boolean;
   /** Array of card data objects to send. */
   cardsInfo: CardDataObject[];
 }
@@ -514,7 +531,7 @@ export async function sendCard(params: SendCardParams): Promise<void> {
     kind: "artifact-update",
     isNew: true,
     append: false,
-    lastChunk: true,
+    lastChunk: params.lastChunk ?? false,
     final: params.final ?? false,
     streamingTextId: getOrCreateStreamingTextId(taskId),
     isReasoningFinished: readReasoningFinished(taskId),
@@ -553,6 +570,8 @@ export interface SendReferenceParams {
   messageId: string;
   toolCallId?: string;
   final?: boolean;
+  /** 标识一段流式文本是否结束。引用帧不是文本流终点，默认 false。 */
+  lastChunk?: boolean;
   references: ReferenceDataItem[];
 }
 
@@ -624,7 +643,7 @@ export async function sendReference(params: SendReferenceParams): Promise<void> 
     kind: "artifact-update",
     isNew: true,
     append: false,
-    lastChunk: true,
+    lastChunk: params.lastChunk ?? false,
     final: params.final ?? false,
     streamingTextId: getOrCreateStreamingTextId(taskId),
     isReasoningFinished: readReasoningFinished(taskId),
@@ -769,7 +788,7 @@ export async function sendTriggerResponse(params: SendTriggerResponseParams): Pr
       kind: "artifact-update",
       isNew: true,
       append: false,
-      lastChunk: true,
+      lastChunk: false,
       final: true,
       streamingTextId: getOrCreateStreamingTextId(taskId),
       isReasoningFinished: readReasoningFinished(taskId),

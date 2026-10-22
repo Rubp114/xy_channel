@@ -705,9 +705,10 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
 
       onReasoningEnd: async () => {
         // SDK thinking_end：标记本 turn reasoning 结束，并补发一帧空 reasoningText
-        // 标记帧（isReasoningFinished=true，显式 pin 而非 lazy 读状态表，防止
-        // 帧在队期间新一轮 reasoning 复位状态导致标记帧丢失语义），让端侧及时
-        // 收起思维链面板；空文本 + append:true 对端侧已有内容无副作用。
+        // 标记帧（isReasoningFinished=true + lastChunk=true，标识思考文本块已结束、
+        // 可开始下一块；两个标记都显式 pin 而非 lazy 读状态表，防止帧在队期间
+        // 新一轮 reasoning 复位状态导致标记帧丢失语义），让端侧及时收起思维链
+        // 面板；空文本 + append:true 对端侧已有内容无副作用。
         const endTaskId = getActiveTaskId();
         markReasoningFinished(endTaskId);
         scopedLog().log(`[REASONING-END] Reasoning finished, taskId=${endTaskId}`);
@@ -725,6 +726,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 text: "",
                 append: true,
                 isReasoningFinished: true,
+                lastChunk: true,
               }),
           });
         } catch (err) {

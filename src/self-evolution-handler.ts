@@ -132,6 +132,7 @@ export async function handleSelfEvolutionStateGetEvent(
     };
 
     // 构造 artifact update 消息，直接通过当前 wsManager 发送
+    // lastChunk=false：本帧是命令（data part），不是文本块终点
     const jsonRpcResponse = {
       jsonrpc: "2.0",
       id: messageId,
@@ -140,7 +141,7 @@ export async function handleSelfEvolutionStateGetEvent(
         kind: "artifact-update",
         isNew: true,
         append: false,
-        lastChunk: true,
+        lastChunk: false,
         final: true,
         artifact: {
           artifactId: uuidv4(),
