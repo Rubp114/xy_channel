@@ -362,8 +362,9 @@ export async function sendExecuteStatusCard(params: {
   const seq = nextStatusCardSeq(params.taskId);
 
   // 若本卡之前刚结束一个流文本块（lastChunk=true 的分段收尾帧 / reasoning
-  // 结束标记帧），本卡携带 thinkIndex=[该块的 taskUniqIndexId]（字符串数组）。
-  // take 语义：仅块结束后的第一张状态卡携带。
+  // 结束标记帧）且下一段流文本已开始发送，本卡携带 thinkIndex=[该块的
+  // taskUniqIndexId]（字符串数组）。take 语义：仅文本恢复后的第一张状态卡
+  // 携带；文本未恢复时标记保留，等恢复后的卡再携带。
   const pendingThinkIndex = takePendingThinkIndex(params.taskId);
 
   // 配对卡先行：DisplayTaskCardData 的顺序必须在 statusCard 之前
