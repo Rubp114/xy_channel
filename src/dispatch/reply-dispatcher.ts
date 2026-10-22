@@ -359,6 +359,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 messageId: aliveMessageId,
                 text: "子任务正在处理中，请稍候",
                 state: "working",
+                logFullFrame: true, // 保活帧打印完整 A2A 帧
               }),
           });
           // 心跳由对话管理层拥有，subagent 等待期间自动存活，无需附加到等待态

@@ -333,6 +333,7 @@ export function startStatusHeartbeat(sessionId: string, text: string = DEFAULT_S
       messageId: current.messageId,
       text,
       state: "working",
+      logFullFrame: true, // 保活帧打印完整 A2A 帧（核查 streamingTextId 等字段）
     }).catch((err) => {
       logger.withContext(sessionId, current.taskId).error(`Failed to send status update:`, err);
     });

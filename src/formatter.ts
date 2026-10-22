@@ -5,7 +5,7 @@ import { sendWsFrame } from "./conversation/outbound-gateway.js";
 import { getOrCreateStreamingTextId, peekStreamingTextId, releaseStreamingTextId } from "./utils/streaming-text-id.js";
 import { isReasoningFinished as readReasoningFinished, releaseReasoningState } from "./utils/reasoning-state.js";
 import { releaseStatusCardSeq, getCurrentStatusCardSeq } from "./utils/status-card-seq.js";
-import { releaseThinkIndex } from "./utils/think-index.js";
+import { markTextResumed, releaseThinkIndex } from "./utils/think-index.js";
 import { logger } from "./utils/logger.js";
 import { redactSensitiveText, containsSensitiveInfo } from "./sensitive-redactor.js";
 import { rewriteOutboundApprovalText } from "./approval-bridge.js";
@@ -155,6 +155,12 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   }
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+  // 正文流式帧实际发出：若此前有流文本块结束（thinkIndex 待下发），
+  // 标记下一段文本已开始 —— 之后的第一张状态卡才携带 thinkIndex。
+  // lastChunk=true 的帧（分段收尾/终帧）是旧块的收尾，不算新段开始。
+  if (!artifact.lastChunk && bridgedText) {
+    markTextResumed(taskId);
+  }
   // 终帧（本轮 turn 文本输出完成）发出后释放 streamingTextId、reasoning 状态、
   // 状态卡序号与 thinkIndex 标记：下轮 turn 生成新 id、reasoning 状态复位为
   // 默认 false、taskUniqIndexId 重新从 1 开始
@@ -233,6 +239,11 @@ export async function sendReasoningTextUpdate(params: SendReasoningTextUpdatePar
   };
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+  // 思维链流式帧实际发出：同正文流式帧，标记 thinkIndex 待下发值的
+  // "下一段文本已开始"（lastChunk=true 的结束标记帧不算新段开始）。
+  if (!artifact.lastChunk && bridgedText) {
+    markTextResumed(taskId);
+  }
 }
 
 /**
@@ -245,6 +256,8 @@ export interface SendStatusUpdateParams {
   messageId: string;
   text: string;
   state: "submitted" | "working" | "input-required" | "completed" | "canceled" | "failed" | "unknown";
+  /** 打印完整 A2A 帧 JSON（默认 false，只打文案摘要）。保活帧开启以核查 streamingTextId 等字段。 */
+  logFullFrame?: boolean;
 }
 
 /**
@@ -296,6 +309,10 @@ export async function sendStatusUpdate(params: SendStatusUpdateParams): Promise<
 
   // Log complete response body
   log.log(`[A2A_STATUS] Sending status-update, text="${redactedText}"`);
+  if (params.logFullFrame) {
+    // 完整帧（statusMessage 已在组帧时脱敏）
+    log.log(`[A2A_STATUS] full frame=${JSON.stringify(jsonRpcResponse)}`);
+  }
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
 }
