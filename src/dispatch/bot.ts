@@ -331,7 +331,7 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       sessionId: parsed.sessionId,
       taskId: parsed.taskId,
       messageId: parsed.messageId,
-      text: "任务正在处理中，请稍候~",
+      text: "任务正在处理中，请稍候",
       state: "working",
     }).catch((err) => {
       log.error(`Failed to send initial status update:`, err);

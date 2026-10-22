@@ -357,7 +357,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 sessionId,
                 taskId: aliveTaskId,
                 messageId: aliveMessageId,
-                text: "子任务正在处理中，请稍候~",
+                text: "子任务正在处理中，请稍候",
                 state: "working",
               }),
           });
@@ -453,7 +453,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     sessionId,
                     taskId: terminalTaskId,
                     messageId: terminalMessageId,
-                    text: "任务处理已完成~",
+                    text: "深度思考已完成",
                     state: "completed",
                   }),
               });
@@ -471,7 +471,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     sessionId,
                     taskId: terminalTaskId,
                     messageId: terminalMessageId,
-                    index: Math.max(1, getCurrentStatusCardSeq(terminalTaskId)),
+                    index: getCurrentStatusCardSeq(terminalTaskId),
                     stepName: "任务处理已完成",
                     isFinal: true,
                   }),
@@ -560,7 +560,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     sessionId,
                     taskId: failureTaskId,
                     messageId: failureMessageId,
-                    text: "任务处理中断了~",
+                    text: "任务处理中断了",
                     state: "failed",
                   }),
               });
@@ -576,7 +576,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     sessionId,
                     taskId: failureTaskId,
                     messageId: failureMessageId,
-                    index: Math.max(1, getCurrentStatusCardSeq(failureTaskId)),
+                    index: getCurrentStatusCardSeq(failureTaskId),
                     stepName: "任务处理已完成",
                     isFinal: true,
                   }),
@@ -591,7 +591,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     sessionId,
                     taskId: failureTaskId,
                     messageId: failureMessageId,
-                    text: "任务执行异常，请重试~",
+                    text: "任务执行异常，请重试",
                     append: false,
                     final: true,
                     errorCode: 99921111,
@@ -732,6 +732,23 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 append: true,
                 isReasoningFinished: true,
                 lastChunk: true,
+              }),
+          });
+
+          // 思考块结束后紧跟一帧 status-update（"深度思考已完成"），
+          // 每个思考块结束时都发；正文完成后不再发（终态帧文案另见
+          // terminal-status）。state=working：turn 仍在进行。
+          outboundQueue.enqueue({
+            taskId: endTaskId,
+            label: "reasoning-end-status",
+            send: () =>
+              sendStatusUpdate({
+                config,
+                sessionId,
+                taskId: endTaskId,
+                messageId: getActiveMessageId(),
+                text: "深度思考已完成",
+                state: "working",
               }),
           });
         } catch (err) {

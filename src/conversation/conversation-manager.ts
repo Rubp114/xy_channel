@@ -298,7 +298,7 @@ export function getCachedXYConfig(): unknown {
 // ─── 30s 状态心跳（manager 拥有，独立于 dispatcher 生命周期） ──
 
 const STATUS_HEARTBEAT_INTERVAL_MS = 30 * 1000;
-const DEFAULT_STATUS_TEXT = "任务正在处理中，请稍候~";
+const DEFAULT_STATUS_TEXT = "任务正在处理中，请稍候";
 
 /**
  * 启动（或重启）session 的 30s 状态心跳。
@@ -524,7 +524,7 @@ export function clearWaitState(sessionId: string, reason: string, taskId?: strin
 /**
  * 当所有 subagent 完成且父 turn 已 settle 时，由 manager 发送终态帧并真正
  * 结束当前 A2A session：
- *   1. completed 状态帧（"任务处理已完成~"）→ final:true 全文本帧（合并
+ *   1. completed 状态帧（"深度思考已完成"）→ final:true 全文本帧（合并
  *      completionTexts）——与 reply-dispatcher 正常终态同序，xy_tester
  *      与客户端依赖该顺序
  *   2. 清理等待态、停止心跳、移除任务链
@@ -590,7 +590,7 @@ export async function deliverSubagentFinalResult(params: {
       sessionId: state.sessionId,
       taskId: effectiveTaskId,
       messageId: effectiveMessageId,
-      text: "任务处理已完成~",
+      text: "深度思考已完成",
       state: "completed",
     });
   // DisplayTaskCardData final 帧收尾对话轮（起始卡在 bot.ts 下发）；
@@ -601,7 +601,7 @@ export async function deliverSubagentFinalResult(params: {
       sessionId: state.sessionId,
       taskId: effectiveTaskId,
       messageId: effectiveMessageId,
-      index: Math.max(1, getCurrentStatusCardSeq(effectiveTaskId)),
+      index: getCurrentStatusCardSeq(effectiveTaskId),
       stepName: "任务处理已完成",
       isFinal: true,
     });

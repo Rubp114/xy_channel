@@ -134,7 +134,8 @@ export interface A2ATaskArtifactUpdateEvent {
   taskUniqId: string;
   /**
    * 当前时刻最后进入出栈队列的工具状态卡（DisplayExecuteStatusCard）的序号，
-   * 端侧据此把这段流式文本显示在序号一致的卡片下方；本 turn 未发过卡片时为 0。
+   * 端侧据此把这段流式文本显示在序号一致的卡片下方；本 turn 未发过卡片时为 1
+   * （对话轮起始卡 index=1）。
    */
   taskUniqIndexId: number;
   kind: "artifact-update";

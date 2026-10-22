@@ -424,8 +424,9 @@ export async function sendCommand(params: SendCommandParams): Promise<void> {
     result: artifact,
   };
 
-  // Log complete response body
-  log.log(`[A2A_COMMAND] Sending command`);
+  // Log complete response body（打印具体下发的命令；组帧时已脱敏）
+  const sentCommands = (artifact.artifact.parts[0] as any)?.data?.commands;
+  log.log(`[A2A_COMMAND] Sending command, commands=${JSON.stringify(sentCommands)}`);
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
   log.log(`[A2A_COMMAND] Command sent successfully`);
 }
