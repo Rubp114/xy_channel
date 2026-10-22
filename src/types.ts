@@ -191,6 +191,8 @@ export interface A2ATaskStatusUpdateEvent {
   /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
   isNew: boolean;
   final: boolean;
+  /** 本轮 turn 当前文本流的 streamingTextId（与 reasoning/正文帧同源同值）。 */
+  streamingTextId?: string;
   status: {
     message: {
       role: "agent";

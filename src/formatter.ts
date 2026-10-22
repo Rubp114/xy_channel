@@ -276,6 +276,9 @@ export async function sendStatusUpdate(params: SendStatusUpdateParams): Promise<
     kind: "status-update",
     isNew: true,
     final: false, // Status updates should not end the stream
+    // 携带本 turn 当前 streamingTextId（与 reasoning/正文帧同一注册表同值），
+    // 保活帧（30s 心跳、subagent 等待）也走这里，端侧可据此确认当前文本段归属
+    streamingTextId: getOrCreateStreamingTextId(taskId),
     status: {
       message: statusMessage,
       state,
