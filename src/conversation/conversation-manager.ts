@@ -145,7 +145,7 @@ export function getCurrentTask(sessionId: string): TaskEntry | null {
 }
 
 /**
- * 文本分段边界（StepInfo 等命令下发后调用），按序完成三个副作用：
+ * 文本分段边界（工具调用/返回时调用，见 step-info-tool），按序完成三个副作用：
  *   1. 旧段收尾：装配器有内容时，以当前（旧）streamingTextId 经出站队列
  *      补发一帧旧段完整全文本（lastChunk=true，标识旧流文本块已结束），
  *      并等队列排空 —— 保证旧 id 段的尾部完整送达（在途 lazy partial 帧

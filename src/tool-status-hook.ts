@@ -1,17 +1,18 @@
-// 工具调用状态帧下发（before_tool_call 钩子）
+// 工具调用状态卡下发（before_tool_call 钩子）
 //
-// 统一收口原来散落在 reply-dispatcher onToolStart 与 call-device-tool
-// execute() 里的「调用工具：xxx」状态帧逻辑：模型每调用一个工具，就在工具
-// 执行前向设备下发一条 status-update（state=working，text=调用工具：xxx）。
+// 模型调用触发表（TOOL_STATUS_CARD_META，见 step-info-tool）内的工具时，
+// 在工具执行前向设备下发一张 DisplayExecuteStatusCard 执行状态卡
+// （text/symbolName 取表内值，同步配对 DisplayTaskCardData）；
+// 表外工具一律不触发。
 // 经 call_device_tool 调度的端工具取其内层 toolName（与设备侧实际执行的
 // 工具名一致）。
 //
 // 仅主会话对话路径生效：sessionKey 未绑定 A2A 身份的（cron/subagent）一律跳过。
 // 钩子体全 try/catch：before_tool_call 抛错会 block 工具执行，
-// 状态帧推送失败绝不能影响工具本身。
+// 状态卡推送失败绝不能影响工具本身。
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { sendStatusUpdate } from "./formatter.js";
+import { sendExecuteStatusCard, TOOL_STATUS_CARD_META } from "./tools/step-info-tool.js";
 import { resolveXYConfig } from "./config.js";
 import {
   resolveBySessionKey,
@@ -21,11 +22,6 @@ import {
 } from "./conversation/conversation-manager.js";
 import { logger } from "./utils/logger.js";
 import type { XYChannelConfig } from "./types.js";
-
-/** 不发状态帧的工具：schema 查询（给 LLM 查参数用）、华为 id（内部工具）。 */
-function shouldSkipToolStatus(toolName: string): boolean {
-  return toolName.endsWith("_tool_schema") || toolName === "huawei_id_tool";
-}
 
 /**
  * 从 call_device_tool 包装中解析真实工具名（与 index.ts 技能打点逻辑一致）。
@@ -40,9 +36,30 @@ function resolveActualToolName(event: { toolName: string; params: Record<string,
   return event.toolName;
 }
 
+/** 参数预览的最大字符数（超出截断）。 */
+const MAX_PARAMS_PREVIEW_LENGTH = 100;
+
+/** 卡片文本：固定文案 + 空格 + 工具参数值预览（只取参数值，空格连接多个值，
+ *  整体双引号包裹，取前 100 字符超出截断）。如：网页搜索 "今天天气"。
+ *  call_device_tool 包装调用解包到内层 arguments；无参数时只回固定文案。 */
+function buildStatusCardText(
+  base: string,
+  event: { toolName: string; params: Record<string, unknown> },
+): string {
+  const params = event.toolName === "call_device_tool" ? event.params?.arguments : event.params;
+  if (!params || typeof params !== "object") return base;
+  const values = Object.values(params)
+    .map((v) => (typeof v === "string" ? v : JSON.stringify(v)))
+    .filter((v): v is string => typeof v === "string" && v.length > 0);
+  if (values.length === 0) return base;
+  const preview = values.join(" ").slice(0, MAX_PARAMS_PREVIEW_LENGTH);
+  return `${base} "${preview}"`;
+}
+
 /**
- * Register the tool-status hook: on every before_tool_call, pushes a
- * status-update frame carrying the actual tool name.
+ * Register the tool-status hook: on before_tool_call, if the tool is in
+ * TOOL_STATUS_CARD_META, pushes a DisplayExecuteStatusCard command with the
+ * table's text/symbolName.
  */
 export function registerToolStatusHook(api: OpenClawPluginApi): void {
   // 优先用每消息缓存的已解析 config；兜底 resolveXYConfig(api.config)。
@@ -66,22 +83,26 @@ export function registerToolStatusHook(api: OpenClawPluginApi): void {
       if (!binding) return;
 
       const toolName = resolveActualToolName(event);
-      if (shouldSkipToolStatus(toolName)) return;
 
       const taskId = getCurrentTaskId(binding.sessionId) ?? binding.taskId;
       const messageId = getCurrentMessageId(binding.sessionId) ?? binding.messageId;
 
-      await sendStatusUpdate({
+      // 仅触发表内工具下发执行状态卡；表外工具不触发
+      const meta = TOOL_STATUS_CARD_META[toolName];
+      if (!meta) return;
+
+      await sendExecuteStatusCard({
         config,
         sessionId: binding.sessionId,
         taskId,
         messageId,
-        text: `正在使用工具：${toolName}`,
-        state: "working",
+        toolCallId: event.toolCallId,
+        text: buildStatusCardText(meta.text ?? toolName, event),
+        symbolName: meta.symbolName,
       });
     } catch (err) {
-      // 状态帧推送失败绝不能 block 工具执行
-      logger.error(`[TOOL-STATUS] before_tool_call status push failed:`, err);
+      // 状态卡推送失败绝不能 block 工具执行
+      logger.error(`[TOOL-STATUS] before_tool_call status card push failed:`, err);
     }
   });
 }

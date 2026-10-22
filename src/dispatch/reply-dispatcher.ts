@@ -641,33 +641,8 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
 
       onToolResult: async (payload: ReplyPayload) => {
         const text = payload.text ?? "";
-        const hasMedia = Boolean(payload.mediaUrl || (payload.mediaUrls?.length ?? 0) > 0);
-
+        // 工具结果不再下发任何帧（结果卡已移除）；保留日志便于排查
         scopedLog().log(`[TOOL-RESULT] Tool result, text.length: ${text.length}`);
-
-        try {
-          if (text.length > 0 || hasMedia) {
-            const resultText = text.length > 0 ? text : "工具执行完成";
-            const toolTaskId = getActiveTaskId();
-
-            outboundQueue.enqueue({
-              taskId: toolTaskId,
-              label: "tool-result-status",
-              send: () =>
-                sendStatusUpdate({
-                  config,
-                  sessionId,
-                  taskId: toolTaskId,
-                  messageId: getActiveMessageId(),
-                  text: resultText,
-                  state: "working",
-                }),
-            });
-            scopedLog().log(`[TOOL-RESULT] Sent tool result as status update`);
-          }
-        } catch (err) {
-          scopedLog().error(`[TOOL-RESULT] Failed to send tool result status:`, err);
-        }
       },
 
       onReasoningStream: async (payload: ReplyPayload) => {
@@ -780,7 +755,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
           const partialMessageId = getActiveMessageId();
 
           // 🔑 帧文本在 drain 时惰性读取装配器，而非入队时捕获快照：
-          // 帧在队期间若发生分段边界（StepInfo 命令下发 → 轮换
+          // 帧在队期间若发生分段边界（工具调用边界 → 轮换
           // streamingTextId + cutSegment），发送时只携带边界后新段的文本，
           // 杜绝在新 streamingTextId 下叠加下发旧 id 段内容。
           outboundQueue.enqueue({

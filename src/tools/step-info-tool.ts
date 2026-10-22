@@ -1,18 +1,16 @@
-// step-info-tool — 工具执行步骤信息 + 任务卡片（before/after_tool_call 钩子）
+// step-info-tool — 文本分段边界 + 任务卡片（before/after_tool_call 钩子）
 //
 // 两个能力合并在本模块（原 skill-tool 已并入）：
 //
-// 1) StepInfo 命令（namespace=Common, name=StepInfo）：分类内工具执行时下发
-//    - before_tool_call → eventType="tool_call"，携带 arguments（调用参数）
-//    - after_tool_call  → eventType="tool_result"，携带 success + result：
-//        成功 → success=true，result=执行结果
-//        失败 → success=false，result=报错信息
-//    - 每次 StepInfo 命令发出后轮换本 turn 的 streamingTextId 并切分流式
-//      装配器（conversation-manager.rotateStreamingTextSegment）：命令前后
-//      的流式文本使用不同 id 分段，且新 id 帧不叠加旧段文本
+// 1) 文本分段边界：分类内工具调用（before_tool_call）与返回（after_tool_call）
+//    时轮换本 turn 的 streamingTextId 并切分流式装配器
+//    （conversation-manager.rotateStreamingTextSegment）：边界前的旧段以
+//    lastChunk=true 收尾帧结束、并标记 thinkIndex 待下发值，边界后的文本帧
+//    使用新 id，且新 id 帧不叠加旧段文本。
+//    （原 Common/StepInfo 命令已移除，只保留分段边界本身。）
 //    - displayName 按分类映射（网页搜索/运行命令/文件创建/编辑文件/读取文件/
 //      查找文件/分析图片/生成图片/生成音乐/生成视频/下载文件）
-//    - 「使用工具」白名单（update_plan/canvas/tool_search 等）不走 StepInfo，见 2)
+//    - 「使用工具」白名单（update_plan/canvas/tool_search 等）无分段边界，见 2)
 //
 // 2) 执行状态卡命令（namespace=UserInteraction, name=DisplayExecuteStatusCard）：
 //    payload={ text, isFinal:true, taskUniqId:taskId,
@@ -24,21 +22,21 @@
 //    - 技能通知：模型 cd 进技能目录或读技能 SKILL.md 时下发
 //        cd 进技能目录 → text=使用技能 <skillName>
 //        读 SKILL.md    → text=查看技能 <skillName>（同命令内 cd+读 md 判为查看）
-//        合并去重：read 工具读 SKILL.md 时只发技能卡片，不再发「读取文件」
-//        StepInfo；read 普通文件只发「读取文件」StepInfo。
-//        exec 命令命中技能检测时，技能卡片与「运行命令」StepInfo 并存。
+//        合并去重：read 工具读 SKILL.md 时只发技能卡片，不再做「读取文件」
+//        分段边界；read 普通文件只做分段边界。
+//        exec 命令命中技能检测时，技能卡片与分段边界并存。
 //    - 「使用工具」白名单工具：只在调用前下发一次卡片（text=displayName），
-//      after 不再下发 tool_result 状态帧。
+//      after 侧无动作。
 //    - update_plan 计划步骤：除「使用工具」卡片外，plan 中 status=in_progress
 //      的步骤也各下发一张卡片（text=步骤文本，同轮多张卡片由
 //      taskUniqIndexId 序号区分）。
 //
-// 仅下发分类内工具；未映射工具（cron、sessions_* 系列、subagents、
+// 仅处理分类内工具；未映射工具（cron、sessions_* 系列、subagents、
 // memory_* 系列、tts 等其余 general 工具与全部端工具）静默跳过。
 // 命令经 formatter.sendCommand 下发，路由与 channel 其它命令一致：
 // 普通对话 WS、cron run push 通道。
 //
-// 状态更新帧（tool-status-hook 的「调用工具：xxx」status-update）不在本模块，
+// 状态更新帧（tool-status-hook 的「正在使用工具：xxx」status-update）不在本模块，
 // 保持不变。
 //
 // 钩子体全 try/catch：before_tool_call 抛错会 block 工具执行，
@@ -63,9 +61,6 @@ import type { A2ACommand, XYChannelConfig } from "../types.js";
 
 const LOG_TAG = "[STEP-INFO]";
 
-/** 单字段序列化长度上限（字符）。超出时只带预览片段 + truncated 标记。 */
-const MAX_FIELD_LENGTH = 8000;
-
 /**
  * displayName 分类映射（保留自工具分类整理结论）。
  *
@@ -78,7 +73,7 @@ const MAX_FIELD_LENGTH = 8000;
  * sessions_* 系列、subagents、session_status、memory_* 系列、tts）
  * 与全部端工具不下发命令。
  *
- * displayName="使用工具" 的白名单工具不下发 StepInfo，改为下发
+ * displayName="使用工具" 的白名单工具不做分段边界，改为下发
  * DisplayExecuteStatusCard 执行状态卡（见 TASK_CARD_TOOLS）。
  */
 const DISPLAY_BY_TOOL: Record<string, string> = {
@@ -121,42 +116,63 @@ const DISPLAY_BY_TOOL: Record<string, string> = {
 
 /**
  * 「使用工具」白名单工具集合（DISPLAY_BY_TOOL 中 displayName="使用工具" 的项）。
- * 这类工具不下发 StepInfo 状态帧，改为 before_tool_call 时下发一次
- * DisplayExecuteStatusCard 执行状态卡（text=displayName），after 不再补 tool_result。
+ * 这类工具不发执行状态卡、不做文本分段边界；update_plan 例外保留
+ * in_progress 步骤卡（before_tool_call 时下发）。
  */
 const TASK_CARD_TOOLS: Set<string> = new Set(
   Object.keys(DISPLAY_BY_TOOL).filter((t) => DISPLAY_BY_TOOL[t] === "使用工具"),
 );
 
 /**
- * 把工具参数/结果转成命令可携带的 JSON 安全字段。
- * 超出上限时只带 preview + truncated 标记（push 通道有载荷限制，exec
- * 输出等可能极大，不能整段塞进命令）。
+ * 工具状态卡触发表：仅表内工具的调用会触发 DisplayExecuteStatusCard
+ * （tool-status-hook 的调用前卡与 reply-dispatcher onToolResult 的结果卡）；
+ * 表外工具一律不触发。text 为卡片展示文案，symbolName 为卡片图标
+ * （协议侧未给图标的端工具省略该字段）。
+ *
+ * 注意三个键以 openclaw 实际注册名为准（与协议侧给的名字不同）：
+ *   upload-file → upload_file；send-file-to-user → send_file_to_user；
+ *   run_subagent → subagents。
+ * create_alarm 协议侧未给文案/图标，text 回退为工具名。
  */
-function normalizeField(value: unknown): unknown {
-  if (value === undefined || value === null || typeof value === "function" || typeof value === "symbol") {
-    return undefined;
-  }
-  if (typeof value === "bigint") return `${value}n`;
-
-  let json: string;
-  try {
-    json = JSON.stringify(value);
-  } catch {
-    return undefined;
-  }
-  if (json.length <= MAX_FIELD_LENGTH) {
-    try {
-      return JSON.parse(json);
-    } catch {
-      return json;
-    }
-  }
-  return {
-    truncated: true,
-    preview: json.slice(0, MAX_FIELD_LENGTH),
-  };
-}
+export const TOOL_STATUS_CARD_META: Record<string, { symbolName?: string; text?: string }> = {
+  web_search: { symbolName: "magnifyingglass", text: "网页搜索" },
+  web_fetch: { symbolName: "pc_ic_tab_index_1", text: "网页抓取" },
+  subagents: { symbolName: "arrow_triangle_divide", text: "启动子任务" },
+  read: { symbolName: "doc_text_badge_magnifyingglass", text: "文件读取" },
+  write: { symbolName: "folder_badge_arrow_left", text: "文件写入" },
+  edit: { symbolName: "doc_plaintext_and_pencil", text: "文件编辑" },
+  bash: { symbolName: "code_square", text: "执行命令" },
+  exec: { symbolName: "wired_projection", text: "CLI工具" },
+  invoke: { symbolName: "code_1", text: "API工具" },
+  upload_file: { symbolName: "electric_install", text: "上传到远程设备" },
+  send_file_to_user: { symbolName: "electric_install", text: "从远程设备下载" },
+  create_calendar_event: { text: "创建日程" },
+  call_phone: { text: "拨打电话" },
+  create_alarm: {text: "创建日程"},
+  delete_alarm: { text: "删除日程" },
+  image_reading: { text: "图片理解" },
+  get_user_location: { text: "获取位置信息" },
+  modify_alarm: { text: "修改闹钟" },
+  modify_note: { text: "追加备忘录" },
+  create_note: { text: "创建备忘录" },
+  query_app_message: { text: "获取设备通知" },
+  save_file_to_file_manager: { text: "保存文件" },
+  save_media_to_gallery: { text: "保存图片" },
+  search_alarm: { text: "查找闹钟" },
+  search_calendar_event: { text: "查找日程" },
+  search_contact: { text: "查找联系人" },
+  search_email: { text: "查找邮件" },
+  search_file: { text: "查找文件" },
+  search_message: { text: "查找短信" },
+  search_notes: { text: "查找备忘录" },
+  search_photo_gallery: { text: "查找图片" },
+  send_email: { text: "发送邮件" },
+  send_message: { text: "发送短信" },
+  add_collection: { text: "记入公共知识" },
+  xiaoyi_append_reference: { text: "知识搜索引用呈现" },
+  query_collection: { text: "查找公共知识" },
+  delete_collection: { text: "删除公共知识" },
+};
 
 // ── 技能检测 ───────────────────────────────────────────────────────
 
@@ -222,8 +238,8 @@ function detectSkillAction(
   return null;
 }
 
-/** 判断该工具调用是否应跳过 StepInfo（read 技能 SKILL.md 只发技能命令）。 */
-function shouldSkipStepInfo(event: { toolName?: string; params?: Record<string, unknown> }): boolean {
+/** 判断当前工具调用是否为 read 技能 SKILL.md（只发技能卡片，不做分段边界）。 */
+function isSkillMdRead(event: { toolName?: string; params?: Record<string, unknown> }): boolean {
   if (event.toolName !== "read") return false;
   return classifyReadPath(event.params?.path)?.kind === "skill";
 }
@@ -306,53 +322,19 @@ function resolveSendContext(
 
 // ── 命令下发 ───────────────────────────────────────────────────────
 
-/** 下发一条 StepInfo 命令。 */
-async function sendStepInfo(params: {
+/** 文本分段边界：以旧 id 补发旧段完整文本（lastChunk=true 收尾帧）并等队列
+ *  排空，再轮换 streamingTextId、切分流式装配器 —— 其后的文本帧使用新 id，
+ *  且只携带边界后新段的文本（端侧按 id 聚合流式文本段）。
+ *  内部还会标记 thinkIndex 待下发值（见 utils/think-index）。 */
+async function rotateTextSegmentAtToolBoundary(params: {
   config: XYChannelConfig;
   sessionId: string;
   taskId: string;
   messageId: string;
-  toolCallId?: string;
-  toolName: string;
-  displayName: string;
-  eventType: "tool_call" | "tool_result";
-  success?: boolean;
-  arguments?: unknown;
-  result?: unknown;
 }): Promise<void> {
-  const command: A2ACommand = {
-    header: { namespace: "Common", name: "StepInfo" },
-    payload: {
-      toolName: params.toolName,
-      displayName: params.displayName,
-      eventType: params.eventType,
-      ...(params.success !== undefined ? { success: params.success } : {}),
-      ...(params.arguments !== undefined ? { arguments: params.arguments } : {}),
-      ...(params.result !== undefined ? { result: params.result } : {}),
-    },
-  };
-
-  await sendCommand({
-    config: params.config,
-    sessionId: params.sessionId,
-    taskId: params.taskId,
-    messageId: params.messageId,
-    command,
-    toolCallId: params.toolCallId,
-  });
-
-  // StepInfo 是 turn 内的文本分段边界：命令发出后先以旧 id 补发旧段完整
-  // 文本（rotateStreamingTextSegment 内部 flush + 等队列排空），再轮换
-  // streamingTextId 并切分流式装配器 —— 其后的文本帧使用新 id，且只携带
-  // 边界后新段的文本，不再叠加旧 id 段内容（端侧按 id 聚合流式文本段）。
-  const newStreamingTextId = await rotateStreamingTextSegment({
-    config: params.config,
-    sessionId: params.sessionId,
-    taskId: params.taskId,
-    messageId: params.messageId,
-  });
+  const newStreamingTextId = await rotateStreamingTextSegment(params);
   logger.log(
-    `${LOG_TAG} rotated streamingTextId taskId=${params.taskId} eventType=${params.eventType} newId=${newStreamingTextId}`,
+    `${LOG_TAG} rotated streamingTextId taskId=${params.taskId} newId=${newStreamingTextId}`,
   );
 }
 
@@ -362,8 +344,9 @@ async function sendStepInfo(params: {
  *  状态卡的序号，从 1 开始递增（见 utils/status-card-seq），同轮多张卡片
  *  由序号区分。
  *  每次下发同步配对一张 DisplayTaskCardData（顺序在 statusCard 之前）：
- *  index/taskUniqIndexId 取本卡序号，stepName 取本卡 text，isFinal=false。 */
-async function sendExecuteStatusCard(params: {
+ *  index/taskUniqIndexId 取本卡序号，stepName 取本卡 text，isFinal=false。
+ *  工具调用状态卡（触发表内工具的调用前卡）也经此下发（tool-status-hook）。 */
+export async function sendExecuteStatusCard(params: {
   config: XYChannelConfig;
   sessionId: string;
   taskId: string;
@@ -371,6 +354,8 @@ async function sendExecuteStatusCard(params: {
   toolCallId?: string;
   /** 卡片展示文本（原 stepName 语义）。 */
   text: string;
+  /** 卡片图标 symbolName（触发表内工具下发时携带；未给则省略该字段）。 */
+  symbolName?: string;
   /** 默认 true。 */
   isFinal?: boolean;
 }): Promise<void> {
@@ -400,6 +385,7 @@ async function sendExecuteStatusCard(params: {
       isFinal: params.isFinal ?? true,
       taskUniqId: params.taskId,
       taskUniqIndexId: seq,
+      ...(params.symbolName ? { symbolName: params.symbolName } : {}),
       ...(pendingThinkIndex !== null ? { thinkIndex: [pendingThinkIndex] } : {}),
     },
   };
@@ -422,7 +408,7 @@ async function sendExecuteStatusCard(params: {
  * Call during `registrationMode === "full"` in the plugin entry point.
  */
 export function registerStepInfoHook(api: OpenClawPluginApi): void {
-  // 工具执行前：技能任务卡片 + StepInfo(tool_call, arguments) / 使用工具任务卡片
+  // 工具执行前：技能任务卡片 / 使用工具任务卡片 / 分类内工具分段边界
   api.on("before_tool_call", async (event, ctx) => {
     try {
       const sendCtx = resolveSendContext(event, ctx);
@@ -445,9 +431,9 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
         );
       }
 
-      // 2. StepInfo（read 技能 SKILL.md 时只走技能卡片，跳过读取文件）
-      if (shouldSkipStepInfo(event)) {
-        logger.log(`${LOG_TAG} skip StepInfo: read skill SKILL.md, tool=${event.toolName}`);
+      // 2. read 技能 SKILL.md 时只走技能卡片，跳过后续所有动作
+      if (isSkillMdRead(event)) {
+        logger.log(`${LOG_TAG} skip: read skill SKILL.md, tool=${event.toolName}`);
         return;
       }
       const displayName = DISPLAY_BY_TOOL[event.toolName];
@@ -461,21 +447,10 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
         );
       }
 
-      // 3. 使用工具类：只在调用前下发一次执行状态卡（text=displayName），
-      //    不下发 StepInfo，after 侧也不补 tool_result 帧
+      // 3. 使用工具白名单：不发卡、无分段边界；update_plan 例外保留
+      //    in_progress 步骤卡（text=步骤文本，同轮多张卡片由 taskUniqIndexId
+      //    序号区分，taskUniqId 同为 taskId）
       if (TASK_CARD_TOOLS.has(event.toolName)) {
-        await sendExecuteStatusCard({
-          ...sendCtx,
-          toolCallId: event.toolCallId,
-          text: displayName,
-        });
-        logger.log(
-          `${LOG_TAG} sent tool status card tool=${event.toolName} text=${displayName}`,
-        );
-
-        // update_plan：plan 中 in_progress 状态的步骤也各下发一张卡片，
-        // text=步骤文本；同轮多张卡片由 taskUniqIndexId 序号区分
-        // （taskUniqId 同为 taskId）
         if (event.toolName === "update_plan") {
           const planSteps = extractInProgressPlanSteps(event.params);
           for (const stepText of planSteps) {
@@ -490,27 +465,22 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
         return;
       }
 
-      await sendStepInfo({
-        ...sendCtx,
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        displayName,
-        eventType: "tool_call",
-        arguments: normalizeField(event.params),
-      });
+      // 4. 分类内工具调用点：文本分段边界（旧段 lastChunk=true 收尾 +
+      //    轮换 streamingTextId），不再下发任何命令
+      await rotateTextSegmentAtToolBoundary({ ...sendCtx });
 
-      logger.log(`${LOG_TAG} sent tool_call tool=${event.toolName} display=${displayName}`);
+      logger.log(`${LOG_TAG} segment boundary at tool_call, tool=${event.toolName} display=${displayName}`);
     } catch (err) {
       // 命令下发失败绝不能 block 工具执行
       logger.error(`${LOG_TAG} before_tool_call hook failed:`, err);
     }
   });
 
-  // 工具执行后：StepInfo(tool_result, success + result)；使用工具类不下发
+  // 工具执行后：分类内工具的文本分段边界；使用工具类无动作
   api.on("after_tool_call", async (event, ctx) => {
     try {
-      // read 技能 SKILL.md 的 result 也不发 StepInfo（与 before 侧去重对齐）
-      if (shouldSkipStepInfo(event)) return;
+      // read 技能 SKILL.md 的 result 也不做任何动作（与 before 侧去重对齐）
+      if (isSkillMdRead(event)) return;
       const displayName = DISPLAY_BY_TOOL[event.toolName];
       if (!displayName) return;
 
@@ -528,27 +498,20 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
         );
       }
 
-      // 使用工具类只在调用前下发一次任务卡片，不下发 tool_result 状态帧
+      // 使用工具类只在调用前下发一次任务卡片，after 侧无动作
       if (TASK_CARD_TOOLS.has(event.toolName)) return;
 
       const sendCtx = resolveSendContext(event, ctx);
       if (!sendCtx) {
-        logger.log(`${LOG_TAG} skip tool_result: no send context, tool=${event.toolName}`);
+        logger.log(`${LOG_TAG} skip segment boundary: no send context, tool=${event.toolName}`);
         return;
       }
 
-      await sendStepInfo({
-        ...sendCtx,
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        displayName,
-        eventType: "tool_result",
-        success: !failed,
-        result: normalizeField(rawResult),
-      });
+      // 工具返回点：文本分段边界（旧段 lastChunk=true 收尾 + 轮换 streamingTextId）
+      await rotateTextSegmentAtToolBoundary({ ...sendCtx });
 
       logger.log(
-        `${LOG_TAG} sent tool_result tool=${event.toolName} display=${displayName} success=${!failed}`,
+        `${LOG_TAG} segment boundary at tool_result, tool=${event.toolName} display=${displayName} success=${!failed}`,
       );
     } catch (err) {
       logger.error(`${LOG_TAG} after_tool_call hook failed:`, err);
