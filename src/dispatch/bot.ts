@@ -565,6 +565,19 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       }
     }
 
+    // 🔑 发送初始状态更新
+    log.log(`[BOT] Sending initial status update`);
+    void sendStatusUpdate({
+      config,
+      sessionId: parsed.sessionId,
+      taskId: parsed.taskId,
+      messageId: parsed.messageId,
+      text: "任务正在处理中，请稍候",
+      state: "working",
+    }).catch((err) => {
+      log.error(`Failed to send initial status update:`, err);
+    });
+
     registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
     turnRegistered = true;
     if (requiresNewTurn || !isUpdate || (steerFailReason === "no-active-run" && !hasWaitState(parsed.sessionId))) {

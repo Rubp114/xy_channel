@@ -19,11 +19,12 @@ export function nextStatusCardSeq(taskId: string): number {
 
 /**
  * 查询指定 taskId 当前时刻最后进入出栈队列的工具状态卡序号；
- * 本 turn 尚未发过卡片时为 0。A2A 消息帧携带该值，端侧把这段流式文本
- * 显示在序号一致的卡片下方（0 表示不在任何卡片下）。
+ * 本 turn 尚未发过卡片时为 1 —— 对话轮开始即下发 index=1 的起始卡
+ * （"任务正在处理中"，见 bot.ts task-card-start），文本流默认显示在它下方。
+ * A2A 消息帧携带该值，端侧把这段流式文本显示在序号一致的卡片下方。
  */
 export function getCurrentStatusCardSeq(taskId: string): number {
-  return statusCardSeqByTask.get(taskId) ?? 0;
+  return statusCardSeqByTask.get(taskId) ?? 1;
 }
 
 /** 释放指定 taskId 的序号状态（turn 结束 / 会话销毁时调用）。幂等。 */
