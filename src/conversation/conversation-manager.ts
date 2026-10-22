@@ -14,6 +14,7 @@ import { randomUUID } from "crypto";
 import { logger } from "../utils/logger.js";
 import { releaseStreamingTextId, rotateStreamingTextId } from "../utils/streaming-text-id.js";
 import { releaseStatusCardSeq, getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
+import { markLastChunkBlock, releaseThinkIndex } from "../utils/think-index.js";
 import { sendStatusUpdate, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
 import type { XYChannelConfig } from "../types.js";
 import {
@@ -62,10 +63,11 @@ export function getSession(sessionId: string): ConversationSession | null {
 export function deleteSession(sessionId: string): void {
   const session = sessions.get(sessionId);
   session?.outboundQueue.destroy();
-  // 会话销毁：释放其任务链上所有 turn 的 streamingTextId 与状态卡序号
+  // 会话销毁：释放其任务链上所有 turn 的 streamingTextId、状态卡序号与 thinkIndex 标记
   for (const entry of session?.tasks ?? []) {
     releaseStreamingTextId(entry.taskId);
     releaseStatusCardSeq(entry.taskId);
+    releaseThinkIndex(entry.taskId);
   }
   sessions.delete(sessionId);
 }
@@ -166,6 +168,10 @@ export async function rotateStreamingTextSegment(params: {
 
   if (session && assembler?.hasContent()) {
     const oldSegmentText = assembler.getFullText();
+    // 记录旧文本块的 taskUniqIndexId：其后第一张 DisplayExecuteStatusCard
+    // 携带 thinkIndex=[该值]。同步标记（而非等收尾帧 drain），保证随后
+    // 工具钩子内组卡时一定能取到。
+    markLastChunkBlock(taskId, getCurrentStatusCardSeq(taskId));
     // 分段收尾帧：lastChunk=true 标识旧流文本块已结束（可开始下一块）。
     // 它是协议关键帧，不设 coalesceKey —— 若被后方同 key 全量帧合并丢弃，
     // 端侧将永远收不到旧块的结束标记。

@@ -5,6 +5,7 @@ import { sendWsFrame } from "./conversation/outbound-gateway.js";
 import { getOrCreateStreamingTextId, releaseStreamingTextId } from "./utils/streaming-text-id.js";
 import { isReasoningFinished as readReasoningFinished, releaseReasoningState } from "./utils/reasoning-state.js";
 import { releaseStatusCardSeq, getCurrentStatusCardSeq } from "./utils/status-card-seq.js";
+import { releaseThinkIndex } from "./utils/think-index.js";
 import { logger } from "./utils/logger.js";
 import { redactSensitiveText, containsSensitiveInfo } from "./sensitive-redactor.js";
 import { rewriteOutboundApprovalText } from "./approval-bridge.js";
@@ -154,13 +155,14 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   }
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
-  // 终帧（本轮 turn 文本输出完成）发出后释放 streamingTextId、reasoning 状态与
-  // 状态卡序号：下轮 turn 生成新 id、reasoning 状态复位为默认 false、
-  // taskUniqIndexId 重新从 1 开始
+  // 终帧（本轮 turn 文本输出完成）发出后释放 streamingTextId、reasoning 状态、
+  // 状态卡序号与 thinkIndex 标记：下轮 turn 生成新 id、reasoning 状态复位为
+  // 默认 false、taskUniqIndexId 重新从 1 开始
   if (final) {
     releaseStreamingTextId(taskId);
     releaseReasoningState(taskId);
     releaseStatusCardSeq(taskId);
+    releaseThinkIndex(taskId);
   }
   if (shouldLog) {
     log.log(`[A2A_RESPONSE] Message sent successfully`);
@@ -809,5 +811,6 @@ export async function sendTriggerResponse(params: SendTriggerResponseParams): Pr
   releaseStreamingTextId(taskId);
   releaseReasoningState(taskId);
   releaseStatusCardSeq(taskId);
+  releaseThinkIndex(taskId);
   log.log(`[TRIGGER_RESPONSE] Trigger response sent successfully`);
 }

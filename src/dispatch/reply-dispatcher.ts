@@ -23,6 +23,7 @@ import {
 import { StreamAssembler } from "../conversation/stream-assembler.js";
 import { markReasoningFinished, markReasoningStreaming } from "../utils/reasoning-state.js";
 import { getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
+import { markLastChunkBlock } from "../utils/think-index.js";
 
 // ⚙️ 前缀是 openclaw 系统消息稳定标记（infra/system-message.ts SYSTEM_MARK）。
 // ACP 绑定会话 turn 结束会以 kind=final 尾随投递系统诊断通知（如
@@ -711,6 +712,10 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
         // 面板；空文本 + append:true 对端侧已有内容无副作用。
         const endTaskId = getActiveTaskId();
         markReasoningFinished(endTaskId);
+        // 记录思考文本块的 taskUniqIndexId：其后第一张 DisplayExecuteStatusCard
+        // 携带 thinkIndex=[该值]。同步标记（而非等标记帧 drain），保证随后
+        // 工具钩子内组卡时一定能取到。
+        markLastChunkBlock(endTaskId, getCurrentStatusCardSeq(endTaskId));
         scopedLog().log(`[REASONING-END] Reasoning finished, taskId=${endTaskId}`);
 
         try {
