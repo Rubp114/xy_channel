@@ -145,8 +145,9 @@ export function getCurrentTask(sessionId: string): TaskEntry | null {
 /**
  * 文本分段边界（StepInfo 等命令下发后调用），按序完成三个副作用：
  *   1. 旧段收尾：装配器有内容时，以当前（旧）streamingTextId 经出站队列
- *      补发一帧旧段完整全文本，并等队列排空 —— 保证旧 id 段的尾部完整
- *      送达（在途 lazy partial 帧也在此期间以旧 id 发出）；
+ *      补发一帧旧段完整全文本（lastChunk=true，标识旧流文本块已结束），
+ *      并等队列排空 —— 保证旧 id 段的尾部完整送达（在途 lazy partial 帧
+ *      也在此期间以旧 id 发出）；
  *   2. 轮换该 turn 的 streamingTextId —— 后续文本帧使用新 id；
  *   3. 切分 session 的流式装配器 —— 后续 append:false 全量帧只携带边界
  *      之后新段的文本，不再叠加旧 id 段内容。
@@ -165,10 +166,12 @@ export async function rotateStreamingTextSegment(params: {
 
   if (session && assembler?.hasContent()) {
     const oldSegmentText = assembler.getFullText();
+    // 分段收尾帧：lastChunk=true 标识旧流文本块已结束（可开始下一块）。
+    // 它是协议关键帧，不设 coalesceKey —— 若被后方同 key 全量帧合并丢弃，
+    // 端侧将永远收不到旧块的结束标记。
     session.outboundQueue.enqueue({
       taskId,
       label: "segment-flush",
-      coalesceKey: `partial:${taskId}`,
       send: () =>
         sendA2AResponse({
           config,
@@ -178,6 +181,7 @@ export async function rotateStreamingTextSegment(params: {
           text: oldSegmentText,
           append: false,
           final: false,
+          lastChunk: true,
         }),
     });
     await session.outboundQueue.whenIdle();
