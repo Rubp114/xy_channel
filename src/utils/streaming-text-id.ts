@@ -30,6 +30,15 @@ export function getOrCreateStreamingTextId(taskId: string): string {
 }
 
 /**
+ * 只读查询指定 taskId 当前在役的 streamingTextId；未登记返回 undefined（不创建）。
+ * status-update 等旁路帧使用：它们只报告当前在役 id，绝不能因查询而创建新 id
+ * （终帧释放后晚到的状态帧若走 get-or-create 会生成不属于任何文本帧的孤儿 id）。
+ */
+export function peekStreamingTextId(taskId: string): string | undefined {
+  return streamingTextIds.get(taskId);
+}
+
+/**
  * 释放指定 taskId 的 streamingTextId（turn 文本流结束：终帧发出 / 任务链清理）。
  * 幂等，未登记的 taskId 为 no-op。
  */

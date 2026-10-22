@@ -2,7 +2,7 @@
 // 纯 A2A 帧构建器：只负责组帧，最后一跳统一走 conversation/outbound-gateway。
 import { v4 as uuidv4 } from "uuid";
 import { sendWsFrame } from "./conversation/outbound-gateway.js";
-import { getOrCreateStreamingTextId, releaseStreamingTextId } from "./utils/streaming-text-id.js";
+import { getOrCreateStreamingTextId, peekStreamingTextId, releaseStreamingTextId } from "./utils/streaming-text-id.js";
 import { isReasoningFinished as readReasoningFinished, releaseReasoningState } from "./utils/reasoning-state.js";
 import { releaseStatusCardSeq, getCurrentStatusCardSeq } from "./utils/status-card-seq.js";
 import { releaseThinkIndex } from "./utils/think-index.js";
@@ -271,14 +271,16 @@ export async function sendStatusUpdate(params: SendStatusUpdateParams): Promise<
     ],
   });
 
+  // 携带本 turn 当前在役的 streamingTextId（peek 只读，不创建——终帧释放后
+  // 晚到的状态帧不得重建出孤儿 id；无在役流时省略该字段）
+  const currentStreamingTextId = peekStreamingTextId(taskId);
+
   const statusUpdate: A2ATaskStatusUpdateEvent = {
     taskId,
     kind: "status-update",
     isNew: true,
     final: false, // Status updates should not end the stream
-    // 携带本 turn 当前 streamingTextId（与 reasoning/正文帧同一注册表同值），
-    // 保活帧（30s 心跳、subagent 等待）也走这里，端侧可据此确认当前文本段归属
-    streamingTextId: getOrCreateStreamingTextId(taskId),
+    ...(currentStreamingTextId ? { streamingTextId: currentStreamingTextId } : {}),
     status: {
       message: statusMessage,
       state,

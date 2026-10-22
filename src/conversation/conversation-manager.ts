@@ -101,6 +101,10 @@ export function registerTask(sessionId: string, taskId: string, messageId: strin
   }
   session.tasks = session.tasks.filter((entry) => entry.taskId !== taskId);
   session.tasks.push({ taskId, messageId, updatedAt: Date.now() });
+  // 新 turn 开始：会话状态复位为 working —— 上一 turn 终态后状态停留在
+  // completing/completed/failed，而心跳 tick 的状态门（仅 working /
+  // waiting-subagent 发保活帧）依赖这里复位，否则后续 turn 心跳永久哑掉。
+  session.state = "working";
   return isUpdate;
 }
 
@@ -312,6 +316,11 @@ export function startStatusHeartbeat(sessionId: string, text: string = DEFAULT_S
   }
   logger.withContext(sessionId, "").log(`[STATUS-HEARTBEAT] Starting manager-owned heartbeat, text="${text}"`);
   session.statusTimer = setInterval(() => {
+    // 终态/收尾中不再发保活帧：终态帧（"深度思考已完成" completed）发出后
+    // 若再发保活帧（working），端侧会看到同 streamingTextId 的状态回退
+    if (session.state !== "working" && session.state !== "waiting-subagent") {
+      return;
+    }
     const current = getCurrentTask(sessionId);
     const config = getCachedXYConfig() as XYChannelConfig | null;
     if (!current || !config) {

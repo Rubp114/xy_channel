@@ -405,6 +405,11 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
             const terminalTaskId = getActiveTaskId();
             const terminalMessageId = getActiveMessageId();
 
+            // 🔑 进入收尾：先把会话状态置为 completing —— 心跳 tick 对该状态
+            // 直接跳过，避免终态帧（completed）发出后、队列 drain 窗口内又
+            // 插出一条携带同 streamingTextId 的 working 保活帧。
+            setSessionState(sessionId, "completing");
+
             // 🔑 权威文本合并：deliver(kind=final) 捕获的 canonical 文本
             // （openclaw 从最后一条 assistant 消息直接提取）非空时替换流式
             // 累计的末轮 —— message_end 的最终清洗文本不走 onPartialReply，
@@ -531,6 +536,8 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
             scopedLog().log(`[ON-IDLE] Skipping final message: hasSentResponse=${hasSentResponse}, finalSent=${finalSent}`);
             const failureTaskId = getActiveTaskId();
             const failureMessageId = getActiveMessageId();
+            // 与正常路径同理：入队失败终态帧前置为 failed，关闭心跳保活窗口
+            setSessionState(sessionId, "failed");
             try {
               const runCrossTaskContext = getRunCrossTaskContext();
               if (runCrossTaskContext) {
