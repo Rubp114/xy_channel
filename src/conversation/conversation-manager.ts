@@ -302,7 +302,7 @@ export function getCachedXYConfig(): unknown {
 // ─── 30s 状态心跳（manager 拥有，独立于 dispatcher 生命周期） ──
 
 const STATUS_HEARTBEAT_INTERVAL_MS = 30 * 1000;
-const DEFAULT_STATUS_TEXT = "任务正在处理中，请稍候";
+const DEFAULT_STATUS_TEXT = "深度思考已完成";
 
 /**
  * 启动（或重启）session 的 30s 状态心跳。

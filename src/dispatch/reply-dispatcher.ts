@@ -357,7 +357,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 sessionId,
                 taskId: aliveTaskId,
                 messageId: aliveMessageId,
-                text: "子任务正在处理中，请稍候",
+                text: "深度思考已完成",
                 state: "working",
                 logFullFrame: true, // 保活帧打印完整 A2A 帧
               }),
