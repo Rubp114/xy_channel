@@ -2,13 +2,16 @@
 // Format: | level | time | sessionId | taskId | msg
 import pino from "pino";
 import { AsyncLocalStorage } from "async_hooks";
-import { mkdirSync, readdirSync, unlinkSync, statSync } from "fs";
+import { mkdirSync, readdirSync, unlinkSync, statSync, existsSync, renameSync } from "fs";
 import { join } from "path";
 
 // ── Configuration ──
 const LOG_DIR = "/tmp/openclaw";
 const LOG_PREFIX = "xiaoyi-channel";
-const MAX_AGE_DAYS = 30;
+// 日志最长只保留最近 7 天
+const MAX_AGE_DAYS = 7;
+// 单个日志文件最大 100MB，超限即切分（备份文件同样按 7 天清理）
+const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 // ── UTC+8 helpers ──
 function getTodayDateStr(): string {
@@ -62,13 +65,40 @@ cleanupTimer.unref?.();
 let currentDate = getTodayDateStr();
 const dest = pino.destination({ dest: getLogFilePath(currentDate), sync: false, mkdir: true });
 
+// ── Current file size tracking (for 100MB cap) ──
+// 进程启动时从现有文件初始化，随后按写入行字节数累加，避免每次写日志都 statSync。
+let currentFileBytes = 0;
+try {
+  currentFileBytes = statSync(getLogFilePath(currentDate)).size;
+} catch {}
+
+// 当前文件超过 100MB：重命名为带时间戳的备份文件后重开新文件。
+// 备份文件名仍以 xiaoyi-channel 开头、.log 结尾，随 cleanupOldLogs 按 7 天统一清理。
+function rotateForSize(): void {
+  try {
+    const currentPath = getLogFilePath(currentDate);
+    let backupPath = join(LOG_DIR, `${LOG_PREFIX}-${formatTimestampUTC8()}.log`);
+    if (existsSync(backupPath)) {
+      backupPath = join(LOG_DIR, `${LOG_PREFIX}-${formatTimestampUTC8()}-${Date.now()}.log`);
+    }
+    renameSync(currentPath, backupPath);
+    dest.reopen(currentPath);
+  } catch {}
+  currentFileBytes = 0;
+}
+
 // ── Rotation check ──
 function checkRotation(): void {
   const today = getTodayDateStr();
   if (today !== currentDate) {
     currentDate = today;
     dest.reopen(getLogFilePath(today));
+    currentFileBytes = 0;
     cleanupOldLogs();
+    return;
+  }
+  if (currentFileBytes >= MAX_FILE_BYTES) {
+    rotateForSize();
   }
 }
 
@@ -104,7 +134,9 @@ function writeLog(level: string, message: string, args: any[], explicitSid?: str
   const taskId = explicitTid !== undefined ? explicitTid : getSessionInfo().taskId;
   const timestamp = formatTimestampUTC8();
   const msg = args.length ? formatMessage(message, args) : message;
-  dest.write(`|${level}|${timestamp}|${sessionId}|${taskId}|${msg}\n`);
+  const line = `|${level}|${timestamp}|${sessionId}|${taskId}|${msg}\n`;
+  currentFileBytes += Buffer.byteLength(line, "utf8");
+  dest.write(line);
 }
 
 export interface ScopedLogger {
