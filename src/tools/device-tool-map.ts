@@ -5,7 +5,7 @@
 // Tools NOT listed in any device entry → available to all devices (no restriction).
 
 /** Known device type enum. */
-export const DEVICE_TYPES = ["car", "2in1", "phone", "web", "pad", "winpc"] as const;
+export const DEVICE_TYPES = ["car", "2in1", "phone", "web", "pad", "winpc", "smartWatch"] as const;
 export type DeviceType = (typeof DEVICE_TYPES)[number];
 
 interface DeviceToolPolicy {
@@ -64,6 +64,29 @@ const DEVICE_TOOL_POLICY: Partial<Record<DeviceType, DeviceToolPolicy>> = {
       "send_cross_device_task",
       "check_plugin_privilege",
       // 卡片展示类（winpc 不支持渲染）
+      "send_html_card",
+      "display-a2ui-card-bypath",
+    ],
+  },
+  "smartWatch": {
+    allowlist: false,
+    tools: [
+      // 端工具总调度入口 + 各域 schema 入口（备忘录/日历/联系人/图库/设备文件/闹钟/收藏）
+      "call_device_tool",
+      "get_note_tool_schema",
+      "get_calendar_tool_schema",
+      "get_contact_tool_schema",
+      "get_photo_tool_schema",
+      "get_device_file_tool_schema",
+      "get_alarm_tool_schema",
+      "get_collection_tool_schema",
+      // 端侧执行 intent 的工具
+      "xiaoyi_gui_agent",
+      "get_user_location",
+      "discover_cross_devices",
+      "send_cross_device_task",
+      "check_plugin_privilege",
+      // 卡片展示类（wearable 不支持渲染）
       "send_html_card",
       "display-a2ui-card-bypath",
     ],
