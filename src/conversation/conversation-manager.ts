@@ -172,9 +172,9 @@ export async function rotateStreamingTextSegment(params: {
 
   if (session && assembler?.hasContent()) {
     const oldSegmentText = assembler.getFullText();
-    // 记录旧文本块的 taskUniqIndexId：其后第一张 DisplayExecuteStatusCard
-    // 携带 thinkIndex=[该值]。同步标记（而非等收尾帧 drain），保证随后
-    // 工具钩子内组卡时一定能取到。
+    // 攒入旧文本块的 taskUniqIndexId：统一在终态汇总卡（text=任务处理已完成）
+    // 携带，中间状态卡不携带。同步标记（而非等收尾帧 drain），保证不受
+    // 出站队列时序影响。
     markLastChunkBlock(taskId, getCurrentStatusCardSeq(taskId));
     // 分段收尾帧：lastChunk=true 标识旧流文本块已结束（可开始下一块）。
     // 它是协议关键帧，不设 coalesceKey —— 若被后方同 key 全量帧合并丢弃，

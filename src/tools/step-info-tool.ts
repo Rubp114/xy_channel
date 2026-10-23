@@ -5,8 +5,8 @@
 // 1) 文本分段边界：分类内工具调用（before_tool_call）与返回（after_tool_call）
 //    时轮换本 turn 的 streamingTextId 并切分流式装配器
 //    （conversation-manager.rotateStreamingTextSegment）：边界前的旧段以
-//    lastChunk=true 收尾帧结束、并标记 thinkIndex 待下发值，边界后的文本帧
-//    使用新 id，且新 id 帧不叠加旧段文本。
+//    lastChunk=true 收尾帧结束、并攒入 thinkIndex（终态汇总卡统一携带），
+//    边界后的文本帧使用新 id，且新 id 帧不叠加旧段文本。
 //    （原 Common/StepInfo 命令已移除，只保留分段边界本身。）
 //    - displayName 按分类映射（网页搜索/运行命令/文件创建/编辑文件/读取文件/
 //      查找文件/分析图片/生成图片/生成音乐/生成视频/下载文件）

@@ -720,9 +720,9 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
         // 面板；空文本 + append:true 对端侧已有内容无副作用。
         const endTaskId = getActiveTaskId();
         markReasoningFinished(endTaskId);
-        // 记录思考文本块的 taskUniqIndexId：其后第一张 DisplayExecuteStatusCard
-        // 携带 thinkIndex=[该值]。同步标记（而非等标记帧 drain），保证随后
-        // 工具钩子内组卡时一定能取到。
+        // 攒入思考文本块的 taskUniqIndexId：统一在终态汇总卡（text=任务处理
+        // 已完成）携带，中间状态卡不携带。同步标记（而非等标记帧 drain），
+        // 保证不受出站队列时序影响。
         markLastChunkBlock(endTaskId, getCurrentStatusCardSeq(endTaskId));
         scopedLog().log(`[REASONING-END] Reasoning finished, taskId=${endTaskId}`);
 
