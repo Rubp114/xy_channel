@@ -43,7 +43,7 @@
 // 命令下发失败绝不能影响工具本身。
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { sendCommand, sendDisplayTaskCardData } from "../formatter.js";
+import { sendExecuteStatusCard } from "../formatter.js";
 import {
   resolveBySessionKey,
   getCachedXYConfig,
@@ -55,9 +55,7 @@ import {
   getCronToolRunInfo,
 } from "./session-manager.js";
 import { logger } from "../utils/logger.js";
-import { nextStatusCardSeq } from "../utils/status-card-seq.js";
-import { takePendingThinkIndex } from "../utils/think-index.js";
-import type { A2ACommand, XYChannelConfig } from "../types.js";
+import type { XYChannelConfig } from "../types.js";
 
 const LOG_TAG = "[STEP-INFO]";
 
@@ -145,7 +143,6 @@ export const TOOL_STATUS_CARD_META: Record<string, { symbolName?: string; text?:
   exec: { symbolName: "wired_projection", text: "执行命令" },
   invoke: { symbolName: "code_1", text: "API工具" },
   upload_file: { symbolName: "electric_install", text: "上传到远程设备" },
-  send_file_to_user: { symbolName: "electric_install", text: "从远程设备下载" },
   create_calendar_event: { text: "创建日程" },
   call_phone: { text: "拨打电话" },
   create_alarm: {text: "创建日程"},
@@ -336,72 +333,6 @@ async function rotateTextSegmentAtToolBoundary(params: {
   logger.log(
     `${LOG_TAG} rotated streamingTextId taskId=${params.taskId} newId=${newStreamingTextId}`,
   );
-}
-
-/** 下发一条执行状态卡命令（UserInteraction/DisplayExecuteStatusCard）。
- *  payload：text 为卡片展示文本；isFinal 默认 true；taskUniqId 取 taskId
- *  （同轮对话内所有卡片相同）；taskUniqIndexId 为本轮对话（taskId）内发送
- *  状态卡的序号，从 1 开始递增（见 utils/status-card-seq），同轮多张卡片
- *  由序号区分。
- *  每次下发同步配对一张 DisplayTaskCardData（顺序在 statusCard 之前）：
- *  index/taskUniqIndexId 取本卡序号，stepName 取本卡 text，isFinal=false。
- *  工具调用状态卡（触发表内工具的调用前卡）也经此下发（tool-status-hook）。 */
-export async function sendExecuteStatusCard(params: {
-  config: XYChannelConfig;
-  sessionId: string;
-  taskId: string;
-  messageId: string;
-  toolCallId?: string;
-  /** 卡片展示文本（原 stepName 语义）。 */
-  text: string;
-  /** 卡片图标 symbolName（触发表内工具下发时携带；未给则省略该字段）。 */
-  symbolName?: string;
-  /** 默认 true。 */
-  isFinal?: boolean;
-}): Promise<void> {
-  const seq = nextStatusCardSeq(params.taskId);
-
-  // 若本卡之前刚结束一个流文本块（lastChunk=true 的分段收尾帧 / reasoning
-  // 结束标记帧）且下一段流文本已开始发送，本卡携带 thinkIndex=[该块的
-  // taskUniqIndexId]（字符串数组）。take 语义：仅文本恢复后的第一张状态卡
-  // 携带；文本未恢复时标记保留，等恢复后的卡再携带。
-  const pendingThinkIndex = takePendingThinkIndex(params.taskId);
-
-  // 配对卡先行：DisplayTaskCardData 的顺序必须在 statusCard 之前
-  await sendDisplayTaskCardData({
-    config: params.config,
-    sessionId: params.sessionId,
-    taskId: params.taskId,
-    messageId: params.messageId,
-    toolCallId: params.toolCallId,
-    index: seq,
-    stepName: params.text,
-    isFinal: false,
-  });
-
-  const command: A2ACommand = {
-    header: { namespace: "UserInteraction", name: "DisplayExecuteStatusCard" },
-    payload: {
-      text: params.text,
-      isFinal: params.isFinal ?? true,
-      taskUniqId: params.taskId,
-      taskUniqIndexId: seq,
-      ...(params.symbolName ? { symbolName: params.symbolName } : {}),
-      ...(pendingThinkIndex !== null ? { thinkIndex: [pendingThinkIndex] } : {}),
-    },
-  };
-  if (pendingThinkIndex !== null) {
-    logger.log(`${LOG_TAG} status card carries thinkIndex=["${pendingThinkIndex}"], taskUniqIndexId=${seq}`);
-  }
-
-  await sendCommand({
-    config: params.config,
-    sessionId: params.sessionId,
-    taskId: params.taskId,
-    messageId: params.messageId,
-    command,
-    toolCallId: params.toolCallId,
-  });
 }
 
 /**

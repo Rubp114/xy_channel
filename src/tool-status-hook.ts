@@ -12,7 +12,8 @@
 // 状态卡推送失败绝不能影响工具本身。
 
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-import { sendExecuteStatusCard, TOOL_STATUS_CARD_META } from "./tools/step-info-tool.js";
+import { sendExecuteStatusCard } from "./formatter.js";
+import { TOOL_STATUS_CARD_META } from "./tools/step-info-tool.js";
 import { resolveXYConfig } from "./config.js";
 import {
   resolveBySessionKey,
