@@ -1,7 +1,7 @@
 // Reply dispatcher - completely following feishu/reply-dispatcher.ts pattern
 import type { ClawdbotConfig, RuntimeEnv, ReplyPayload } from "openclaw/plugin-sdk";
 import { getXYRuntime } from "../runtime.js";
-import { sendA2AResponse, sendStatusUpdate, sendReasoningTextUpdate, sendCommand, sendDisplayTaskCardData } from "../formatter.js";
+import { sendA2AResponse, sendStatusUpdate, sendReasoningTextUpdate, sendCommand, sendDisplayTaskCardData, sendExecuteStatusCard } from "../formatter.js";
 import { resolveXYConfig } from "../config.js";
 import type { A2ACommand, RunCrossTaskContext, XYChannelConfig } from "../types.js";
 import { clearRunCrossTaskSentFiles, getCurrentSessionContext } from "../tools/session-manager.js";
@@ -23,7 +23,7 @@ import {
 import { StreamAssembler } from "../conversation/stream-assembler.js";
 import { markReasoningFinished, markReasoningStreaming } from "../utils/reasoning-state.js";
 import { getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
-import { markLastChunkBlock } from "../utils/think-index.js";
+import { markLastChunkBlock, getAccumulatedThinkIndex } from "../utils/think-index.js";
 
 // ⚙️ 前缀是 openclaw 系统消息稳定标记（infra/system-message.ts SYSTEM_MARK）。
 // ACP 绑定会话 turn 结束会以 kind=final 尾随投递系统诊断通知（如
@@ -357,7 +357,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 sessionId,
                 taskId: aliveTaskId,
                 messageId: aliveMessageId,
-                text: "深度思考已完成",
+                text: "思考中",
                 state: "working",
                 logFullFrame: true, // 保活帧打印完整 A2A 帧
               }),
@@ -459,15 +459,59 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     sessionId,
                     taskId: terminalTaskId,
                     messageId: terminalMessageId,
-                    text: "深度思考已完成",
+                    text: "思考已完成",
                     state: "completed",
                   }),
               });
 
+              // 🔑 正文文本完成帧（lastChunk=true, final=false）：权威全文本在此
+              // 补齐（原终帧携带全文本的语义前移到本帧），把 final=true 留给
+              // 最后的空载终帧 —— 满足「正文 lastChunk → 汇总卡 → final」时序。
+              if (fullFinalText) {
+                outboundQueue.enqueue({
+                  taskId: terminalTaskId,
+                  label: "terminal-text-complete",
+                  delayMs: terminalFrameDelayMs,
+                  send: () =>
+                    sendA2AResponse({
+                      config,
+                      sessionId,
+                      taskId: terminalTaskId,
+                      messageId: terminalMessageId,
+                      text: fullFinalText,
+                      append: false,
+                      final: false,
+                      lastChunk: true,
+                    }),
+                });
+              }
+
+              // 🔑 汇总状态卡：thinkIndex 攒批（本 turn 内工具卡不逐张携带，
+              // 攒到这里统一下发）——携带除最后一轮正文外的前置轮文本块
+              // taskUniqIndexId（最后一轮正文的 id = 当前卡序号，过滤掉）。
+              // 排在 final 帧之前：终态帧发出后服务端可能关闭本 turn。
+              {
+                const currentSeq = getCurrentStatusCardSeq(terminalTaskId);
+                const summaryThinkIndex = getAccumulatedThinkIndex(terminalTaskId)
+                  .filter((id) => id !== String(currentSeq));
+                outboundQueue.enqueue({
+                  taskId: terminalTaskId,
+                  label: "terminal-summary-card",
+                  send: () =>
+                    sendExecuteStatusCard({
+                      config,
+                      sessionId,
+                      taskId: terminalTaskId,
+                      messageId: terminalMessageId,
+                      text: "任务处理已完成",
+                      thinkIndex: summaryThinkIndex,
+                    }),
+                });
+              }
+
               // 对话轮结束：DisplayTaskCardData final 帧收尾（起始卡在 bot.ts
-              // 下发；index 取当前状态卡序号，未发过卡时为 1 即收尾起始卡）。
-              // 必须排在 A2A 终态文本帧（final=true）之前 —— 终态帧发出后
-              // 服务端可能关闭本 turn，其后的帧不再可达。
+              // 下发）。index 在 drain 时惰性读取 —— 排在汇总卡之后，落在
+              // 汇总卡的序号上完成配对收尾。
               outboundQueue.enqueue({
                 taskId: terminalTaskId,
                 label: "task-card-final",
@@ -483,42 +527,23 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                   }),
               });
 
-              // 🔑 最终帧携带权威全文本（append:false 整体替换）—— 流式期间
-              // 缺失的尾部在此补齐。空文本属异常路径，回退旧的空帧语义
-              // （append:true 仅标记流结束），避免把客户端已展示内容刷空。
-              if (fullFinalText) {
-                outboundQueue.enqueue({
-                  taskId: terminalTaskId,
-                  label: "terminal-final",
-                  delayMs: terminalFrameDelayMs,
-                  send: () =>
-                    sendA2AResponse({
-                      config,
-                      sessionId,
-                      taskId: terminalTaskId,
-                      messageId: terminalMessageId,
-                      text: fullFinalText,
-                      append: false,
-                      final: true,
-                    }),
-                });
-              } else {
-                outboundQueue.enqueue({
-                  taskId: terminalTaskId,
-                  label: "terminal-final-empty",
-                  delayMs: terminalFrameDelayMs,
-                  send: () =>
-                    sendA2AResponse({
-                      config,
-                      sessionId,
-                      taskId: terminalTaskId,
-                      messageId: terminalMessageId,
-                      text: "",
-                      append: true,
-                      final: true,
-                    }),
-                });
-              }
+              // 🔑 空载终帧（append:true, final:true）仅标记流结束 —— 权威全文本
+              // 已在上面的 terminal-text-complete 帧下发，本帧不再携带文本。
+              outboundQueue.enqueue({
+                taskId: terminalTaskId,
+                label: "terminal-final",
+                delayMs: terminalFrameDelayMs,
+                send: () =>
+                  sendA2AResponse({
+                    config,
+                    sessionId,
+                    taskId: terminalTaskId,
+                    messageId: terminalMessageId,
+                    text: "",
+                    append: true,
+                    final: true,
+                  }),
+              });
 
               await outboundQueue.whenIdle();
               finalSent = true;
@@ -718,7 +743,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
               }),
           });
 
-          // 思考块结束后紧跟一帧 status-update（"深度思考已完成"），
+          // 思考块结束后紧跟一帧 status-update（"思考已完成"），
           // 每个思考块结束时都发；正文完成后不再发（终态帧文案另见
           // terminal-status）。state=working：turn 仍在进行。
           outboundQueue.enqueue({
@@ -730,7 +755,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 sessionId,
                 taskId: endTaskId,
                 messageId: getActiveMessageId(),
-                text: "深度思考已完成",
+                text: "思考已完成",
                 state: "working",
               }),
           });

@@ -4,8 +4,8 @@ import { v4 as uuidv4 } from "uuid";
 import { sendWsFrame } from "./conversation/outbound-gateway.js";
 import { getOrCreateStreamingTextId, peekStreamingTextId, releaseStreamingTextId } from "./utils/streaming-text-id.js";
 import { isReasoningFinished as readReasoningFinished, releaseReasoningState } from "./utils/reasoning-state.js";
-import { releaseStatusCardSeq, getCurrentStatusCardSeq } from "./utils/status-card-seq.js";
-import { markTextResumed, releaseThinkIndex } from "./utils/think-index.js";
+import { releaseStatusCardSeq, getCurrentStatusCardSeq, nextStatusCardSeq } from "./utils/status-card-seq.js";
+import { releaseThinkIndex } from "./utils/think-index.js";
 import { logger } from "./utils/logger.js";
 import { redactSensitiveText, containsSensitiveInfo } from "./sensitive-redactor.js";
 import { rewriteOutboundApprovalText } from "./approval-bridge.js";
@@ -155,14 +155,8 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   }
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
-  // 正文流式帧实际发出：若此前有流文本块结束（thinkIndex 待下发），
-  // 标记下一段文本已开始 —— 之后的第一张状态卡才携带 thinkIndex。
-  // lastChunk=true 的帧（分段收尾/终帧）是旧块的收尾，不算新段开始。
-  if (!artifact.lastChunk && bridgedText) {
-    markTextResumed(taskId);
-  }
   // 终帧（本轮 turn 文本输出完成）发出后释放 streamingTextId、reasoning 状态、
-  // 状态卡序号与 thinkIndex 标记：下轮 turn 生成新 id、reasoning 状态复位为
+  // 状态卡序号与 thinkIndex 攒批：下轮 turn 生成新 id、reasoning 状态复位为
   // 默认 false、taskUniqIndexId 重新从 1 开始
   if (final) {
     releaseStreamingTextId(taskId);
@@ -239,11 +233,6 @@ export async function sendReasoningTextUpdate(params: SendReasoningTextUpdatePar
   };
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
-  // 思维链流式帧实际发出：同正文流式帧，标记 thinkIndex 待下发值的
-  // "下一段文本已开始"（lastChunk=true 的结束标记帧不算新段开始）。
-  if (!artifact.lastChunk && bridgedText) {
-    markTextResumed(taskId);
-  }
 }
 
 /**
@@ -500,6 +489,81 @@ export async function sendDisplayTaskCardData(params: SendDisplayTaskCardDataPar
     sessionId: params.sessionId,
     taskId: params.taskId,
     messageId: params.messageId,
+    command,
+    toolCallId: params.toolCallId,
+  });
+}
+
+/**
+ * 执行状态卡（UserInteraction/DisplayExecuteStatusCard）下发参数。
+ */
+export interface SendExecuteStatusCardParams {
+  config: XYChannelConfig;
+  sessionId: string;
+  taskId: string;
+  messageId: string;
+  /** toolCallId from the tool's execute() — used for cron detection via hook-set Map. */
+  toolCallId?: string;
+  /** 卡片展示文本。 */
+  text: string;
+  /** 卡片图标 symbolName（触发表内工具下发时携带；未给则省略该字段）。 */
+  symbolName?: string;
+  /** 默认 true。 */
+  isFinal?: boolean;
+  /** thinkIndex 攒批数组（前置轮文本块的 taskUniqIndexId，字符串数组）；
+   *  仅对话轮结束的汇总卡携带；空数组时省略该字段。 */
+  thinkIndex?: string[];
+}
+
+/**
+ * 下发一条执行状态卡命令（UserInteraction/DisplayExecuteStatusCard）。
+ *  payload：text 为卡片展示文本；isFinal 默认 true；taskUniqId 取 taskId
+ *  （同轮对话内所有卡片相同）；taskUniqIndexId 为本轮对话（taskId）内发送
+ *  状态卡的序号，从 1 开始递增（见 utils/status-card-seq），同轮多张卡片
+ *  由序号区分。
+ *  每次下发同步配对一张 DisplayTaskCardData（顺序在 statusCard 之前）：
+ *  index/taskUniqIndexId 取本卡序号，stepName 取本卡 text，isFinal=false。
+ *
+ *  本函数收口在 formatter（而非 tools 层）：conversation-manager 的终态路径
+ *  也要下发汇总卡，tools 层不可被 conversation 层反向依赖。
+ */
+export async function sendExecuteStatusCard(params: SendExecuteStatusCardParams): Promise<void> {
+  const { config, sessionId, taskId, messageId } = params;
+  const log = logger.withContext(sessionId, taskId);
+  const seq = nextStatusCardSeq(taskId);
+
+  // 配对卡先行：DisplayTaskCardData 的顺序必须在 statusCard 之前
+  await sendDisplayTaskCardData({
+    config,
+    sessionId,
+    taskId,
+    messageId,
+    toolCallId: params.toolCallId,
+    index: seq,
+    stepName: params.text,
+    isFinal: false,
+  });
+
+  const command: A2ACommand = {
+    header: { namespace: "UserInteraction", name: "DisplayExecuteStatusCard" },
+    payload: {
+      text: params.text,
+      isFinal: params.isFinal ?? true,
+      taskUniqId: taskId,
+      taskUniqIndexId: seq,
+      ...(params.symbolName ? { symbolName: params.symbolName } : {}),
+      ...(params.thinkIndex && params.thinkIndex.length > 0 ? { thinkIndex: params.thinkIndex } : {}),
+    },
+  };
+  if (params.thinkIndex && params.thinkIndex.length > 0) {
+    log.log(`[STATUS-CARD] status card carries thinkIndex=${JSON.stringify(params.thinkIndex)}, taskUniqIndexId=${seq}`);
+  }
+
+  await sendCommand({
+    config,
+    sessionId,
+    taskId,
+    messageId,
     command,
     toolCallId: params.toolCallId,
   });

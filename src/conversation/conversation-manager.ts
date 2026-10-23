@@ -14,8 +14,8 @@ import { randomUUID } from "crypto";
 import { logger } from "../utils/logger.js";
 import { releaseStreamingTextId, rotateStreamingTextId } from "../utils/streaming-text-id.js";
 import { releaseStatusCardSeq, getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
-import { markLastChunkBlock, releaseThinkIndex } from "../utils/think-index.js";
-import { sendStatusUpdate, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
+import { markLastChunkBlock, getAccumulatedThinkIndex, releaseThinkIndex } from "../utils/think-index.js";
+import { sendStatusUpdate, sendA2AResponse, sendDisplayTaskCardData, sendExecuteStatusCard } from "../formatter.js";
 import type { XYChannelConfig } from "../types.js";
 import {
   ConversationSession,
@@ -302,7 +302,7 @@ export function getCachedXYConfig(): unknown {
 // ─── 30s 状态心跳（manager 拥有，独立于 dispatcher 生命周期） ──
 
 const STATUS_HEARTBEAT_INTERVAL_MS = 30 * 1000;
-const DEFAULT_STATUS_TEXT = "深度思考已完成";
+const DEFAULT_STATUS_TEXT = "思考中";
 
 /**
  * 启动（或重启）session 的 30s 状态心跳。
@@ -316,7 +316,7 @@ export function startStatusHeartbeat(sessionId: string, text: string = DEFAULT_S
   }
   logger.withContext(sessionId, "").log(`[STATUS-HEARTBEAT] Starting manager-owned heartbeat, text="${text}"`);
   session.statusTimer = setInterval(() => {
-    // 终态/收尾中不再发保活帧：终态帧（"深度思考已完成" completed）发出后
+    // 终态/收尾中不再发保活帧：终态帧（"思考已完成" completed）发出后
     // 若再发保活帧（working），端侧会看到同 streamingTextId 的状态回退
     if (session.state !== "working" && session.state !== "waiting-subagent") {
       return;
@@ -534,7 +534,7 @@ export function clearWaitState(sessionId: string, reason: string, taskId?: strin
 /**
  * 当所有 subagent 完成且父 turn 已 settle 时，由 manager 发送终态帧并真正
  * 结束当前 A2A session：
- *   1. completed 状态帧（"深度思考已完成"）→ final:true 全文本帧（合并
+ *   1. completed 状态帧（"思考已完成"）→ final:true 全文本帧（合并
  *      completionTexts）——与 reply-dispatcher 正常终态同序，xy_tester
  *      与客户端依赖该顺序
  *   2. 清理等待态、停止心跳、移除任务链
@@ -600,11 +600,37 @@ export async function deliverSubagentFinalResult(params: {
       sessionId: state.sessionId,
       taskId: effectiveTaskId,
       messageId: effectiveMessageId,
-      text: "深度思考已完成",
+      text: "思考已完成",
       state: "completed",
     });
+  // 正文文本完成帧（lastChunk=true, final=false）：权威全文本在此下发，
+  // final=true 留给最后的空载终帧 —— 与 reply-dispatcher 终态序列一致
+  // （正文 lastChunk → 汇总卡 → final）。
+  const sendTextComplete = () =>
+    sendA2AResponse({
+      config,
+      sessionId: state.sessionId,
+      taskId: effectiveTaskId,
+      messageId: effectiveMessageId,
+      text: finalText,
+      append: false,
+      final: false,
+      lastChunk: true,
+    });
+  // 汇总状态卡：thinkIndex 攒批（除最后一轮正文外的前置轮 taskUniqIndexId），
+  // text=任务处理已完成；排在 final 帧之前。
+  const sendSummaryCard = () =>
+    sendExecuteStatusCard({
+      config,
+      sessionId: state.sessionId,
+      taskId: effectiveTaskId,
+      messageId: effectiveMessageId,
+      text: "任务处理已完成",
+      thinkIndex: getAccumulatedThinkIndex(effectiveTaskId)
+        .filter((id) => id !== String(getCurrentStatusCardSeq(effectiveTaskId))),
+    });
   // DisplayTaskCardData final 帧收尾对话轮（起始卡在 bot.ts 下发）；
-  // 必须排在 final 文本帧之前 —— 终态帧发出后服务端可能关闭本 turn。
+  // 排在汇总卡之后（index 惰性读取，落在汇总卡序号上），final 帧之前。
   const sendTaskCardFinal = () =>
     sendDisplayTaskCardData({
       config,
@@ -615,14 +641,15 @@ export async function deliverSubagentFinalResult(params: {
       stepName: "任务处理已完成",
       isFinal: true,
     });
+  // 空载终帧（append:true, final:true）仅标记流结束
   const sendFinal = () =>
     sendA2AResponse({
       config,
       sessionId: state.sessionId,
       taskId: effectiveTaskId,
       messageId: effectiveMessageId,
-      text: finalText,
-      append: false,
+      text: "",
+      append: true,
       final: true,
     });
   if (session) {
@@ -631,6 +658,16 @@ export async function deliverSubagentFinalResult(params: {
       label: "subagent-terminal-status",
       delayMs: terminalFrameDelayMs,
       send: sendCompletedStatus,
+    });
+    session.outboundQueue.enqueue({
+      taskId: effectiveTaskId,
+      label: "subagent-text-complete",
+      send: sendTextComplete,
+    });
+    session.outboundQueue.enqueue({
+      taskId: effectiveTaskId,
+      label: "subagent-summary-card",
+      send: sendSummaryCard,
     });
     session.outboundQueue.enqueue({
       taskId: effectiveTaskId,
@@ -646,6 +683,8 @@ export async function deliverSubagentFinalResult(params: {
     await session.outboundQueue.whenIdle();
   } else {
     await sendCompletedStatus();
+    await sendTextComplete();
+    await sendSummaryCard();
     await sendTaskCardFinal();
     await sendFinal();
   }
