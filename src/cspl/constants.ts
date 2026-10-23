@@ -119,7 +119,6 @@ export const IF1_COUNTRY_CODE = 'CN';
 // 安全扫描 textSource 枚举（IF1 接口）
 export const TOOL_INPUT_TEXT_SOURCE = 'toolInput';
 export const TOOL_OUTPUT_TEXT_SOURCE = 'toolOutput';
-export const SKILL_INSTALL_TEXT_SOURCE = 'skillInstall';
 
 // IF1 接口 questionText 最大长度（接口约束 8192）
 export const MAX_QUESTION_TEXT_LENGTH = 8192;

@@ -149,33 +149,3 @@ export async function callApi(payload: object, api: OpenClawPluginApi, sessionId
         req.end();
     });
 }
-
-export async function callSkillScanApi(url_suffix: string, payload: object, api: OpenClawPluginApi, sessionId: string): Promise<ApiResponse> {
-    const config = getConfig(api);
-
-    const headersForCelia = buildHeadersForCelia(config, sessionId);
-
-    // 风控 IF1 接口 body 由 buildSkillScanPayload 完整组装，无需注入额外字段
-    const httpBody = JSON.stringify(payload);
-
-    return new Promise((resolve, reject) => {
-        const url = config.api.url + url_suffix;
-        const options = buildRequestOptions(url, headersForCelia as HttpHeaders, config.api.timeout);
-        const protocol = url.startsWith('https://') ? https : http;
-        const req = protocol.request(options, (res) => {
-            handleResponse(res, resolve, reject);
-        });
-
-        req.on('error', (error) => {
-            reject(error);
-        });
-
-        req.on('timeout', () => {
-            req.destroy();
-            reject(new Error('[ai-security-plugin][skill_scope_hook] Request timeout'));
-        });
-
-        req.write(httpBody);
-        req.end();
-    });
-}

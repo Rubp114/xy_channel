@@ -20,6 +20,6 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
-  "include": ["src/**/*", "index.ts", "provider-discovery.ts"],
+  "include": ["src/**/*", "plugin-scope/**/*", "index.ts", "provider-discovery.ts"],
   "exclude": ["node_modules", "dist"]
 }

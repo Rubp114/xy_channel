@@ -5,7 +5,7 @@ import { xiaoyiProvider } from "./src/provider.js";
 import { xiaoyiCompactionProvider } from "./src/compaction-provider.js";
 import { xyPlugin } from "./src/channel.js";
 import registerSentinelHook from "./src/cspl/sentinel_hook.js";
-import registerSkillScopeHook from "./src/cspl/skill_scope_hook.js";
+import registerSkillScopeHook from "./plugin-scope/skill_scope_hook.js";
 import { setXYRuntime } from "./src/runtime.js";
 import { markCronToolCall, clearCronToolCall, getCurrentSessionContext, setCronToolRunInfo, clearCronToolRunInfo, isCronActive } from "./src/tools/session-manager.js";
 import { parseCronJobIdFromSessionKey, registerCronToolGuard } from "./src/tools/cron-tool-guard.js";
@@ -703,7 +703,8 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       registerFullHooks(api);
       // CSPL sentinel hook: before_tool_call + after_tool_call security scanning
       registerSentinelHook(api);
-      // CSPL skill scope hook: before_install security scanning
+      // Skill scope hook: before_install 云端安全扫描（skill/plugin 安装前预检，
+      // 扫描 REJECT 阻断；扫描异常 skill 放行、plugin 阻断；内核侧对 hook 异常 fail-closed）
       registerSkillScopeHook(api);
       // Cron tool guard: rejects unsupported tools before they can produce side effects
       registerCronToolGuard(api);

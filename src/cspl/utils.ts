@@ -30,7 +30,6 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { Buffer } from 'buffer';
-import { execSync } from 'child_process';
 import os from 'os';
 import type {OpenClawPluginApi} from "openclaw/plugin-sdk";
 
@@ -533,110 +532,6 @@ export async function handleMessageToolInput(event: any, api: OpenClawPluginApi,
     logger.log(`[SENTINEL HOOK] Sending TOOL_INPUT for message, body length: ${JSON.stringify(toolInputPayload).length}`);
 
     return await sendToolInputRequest(toolInputPayload, api, sessionId, event.toolCallId, taskId);
-}
-
-// 计算项目目录的哈希值（遍历所有文件）
-export function calculateProjectHash(sourcePath: string): string {
-    const hash = crypto.createHash('sha256');
-    try {
-        const files = walkDirSync(sourcePath);
-        for (const file of files.sort()) {
-            const content = fs.readFileSync(file, 'utf8');
-            hash.update(file);
-            hash.update(content);
-        }
-    } catch {
-        // 如果是单文件，直接计算文件哈希
-        if (fs.existsSync(sourcePath) && fs.statSync(sourcePath).isFile()) {
-            const content = fs.readFileSync(sourcePath, 'utf8');
-            hash.update(content);
-        }
-    }
-    return hash.digest('hex');
-}
-
-// 递归遍历目录获取所有文件路径
-function walkDirSync(dir: string): string[] {
-    const results: string[] = [];
-    try {
-        const list = fs.readdirSync(dir);
-        for (const file of list) {
-            const fullPath = path.join(dir, file);
-            const stat = fs.statSync(fullPath);
-            if (stat.isDirectory()) {
-                results.push(...walkDirSync(fullPath));
-            } else {
-                results.push(fullPath);
-            }
-        }
-    } catch {
-        // ignore
-    }
-    return results;
-}
-
-// 创建zip并上传到OBS，返回下载URL
-export async function createAndUploadZip(
-    sourcePath: string,
-    apiConfig: { apiKey: string; uid: string; serviceUrl: string },
-    api: OpenClawPluginApi
-): Promise<string> {
-    const tmpDir = os.tmpdir();
-    const zipName = `skill_${Date.now()}.zip`;
-    const zipPath = path.join(tmpDir, zipName);
-
-    try {
-        // 创建zip包
-        const parentDir = path.dirname(sourcePath);
-        const baseName = path.basename(sourcePath);
-        execSync(`cd "${parentDir}" && zip -r "${zipPath}" "${baseName}"`, { encoding: 'utf8' });
-
-        const fileHash = calculateContentHash(fs.readFileSync(zipPath, 'utf8'));
-        const downloadUrl = await uploadFileToObsMain(zipPath, api, fileHash, crypto.randomBytes(16).toString('hex'));
-        return downloadUrl;
-    } finally {
-        // 清理临时文件
-        try {
-            if (fs.existsSync(zipPath)) {
-                fs.unlinkSync(zipPath);
-            }
-        } catch {
-            // ignore cleanup errors
-        }
-    }
-}
-
-// 根据origin判断skill类型
-export function getOriginType(origin: string): string {
-    if (!origin) return 'create';
-    if (origin.includes('download')) return 'download';
-    if (origin.includes('upload')) return 'upload';
-    return 'create';
-}
-
-// 加载skill内容（从SKILL.md或目录中的主要文件）
-export function loadSkillContent(sourcePath: string): string {
-    try {
-        // 如果是目录，尝试读取SKILL.md
-        if (fs.statSync(sourcePath).isDirectory()) {
-            const skillMdPath = path.join(sourcePath, 'SKILL.md');
-            if (fs.existsSync(skillMdPath)) {
-                return fs.readFileSync(skillMdPath, 'utf8');
-            }
-            // 尝试读取目录下第一个md文件
-            const files = fs.readdirSync(sourcePath);
-            for (const file of files) {
-                if (file.endsWith('.md')) {
-                    return fs.readFileSync(path.join(sourcePath, file), 'utf8');
-                }
-            }
-            return '';
-        }
-        // 单文件直接读取
-        return fs.readFileSync(sourcePath, 'utf8');
-    } catch {
-        return '';
-    }
 }
 
 // 处理其他工具（非 exec 和非 message）的 TOOL_INPUT 数据采集，返回扫描结果（保留block/steer能力）

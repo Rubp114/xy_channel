@@ -6,6 +6,7 @@ import { dirname } from "node:path";
 
 const ASSETS = [
   ["src/cspl/configs.json", "dist/src/cspl/configs.json"],
+  ["plugin-scope/configs.json", "dist/plugin-scope/configs.json"],
 ];
 
 for (const [src, dest] of ASSETS) {
