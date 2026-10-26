@@ -166,7 +166,6 @@ export const TOOL_STATUS_CARD_META: Record<string, { symbolName?: string; text?:
   send_email: { text: "发送邮件" },
   send_message: { text: "发送短信" },
   add_collection: { text: "记入公共知识" },
-  xiaoyi_append_reference: { text: "知识搜索引用呈现" },
   query_collection: { text: "查找公共知识" },
   delete_collection: { text: "删除公共知识" },
 };
