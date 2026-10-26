@@ -186,6 +186,9 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
 
   let hasSentResponse = false;
   let finalSent = false;
+  // 当前思考块的最新全量快照（onReasoningStream 的 append:false 语义即全量），
+  // 供 onReasoningEnd 的思考块结束标记帧携带全量文本
+  let lastReasoningText = "";
 
   // ── 文本装配与出站时序由对话管理层拥有 ─────────────────────
   // assembler：model/injected 段拼接 + deliver 权威文本修正，生命周期随本
@@ -671,6 +674,9 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
         try {
           if (text.length > 0) {
             const reasoningTaskId = getActiveTaskId();
+            // 记录当前思考块最新全量快照（append:false 语义即全量），
+            // 供思考块结束标记帧携带
+            lastReasoningText = text;
             // 新一轮 reasoning 流开始：复位 turn 级 isReasoningFinished
             // （同一 turn 可能有多个 reasoning 块：思考→工具→再思考）。
             markReasoningStreaming(reasoningTaskId);
@@ -694,11 +700,11 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
       },
 
       onReasoningEnd: async () => {
-        // SDK thinking_end：标记本 turn reasoning 结束，并补发一帧空 reasoningText
-        // 标记帧（isReasoningFinished=true + lastChunk=true，标识思考文本块已结束、
-        // 可开始下一块；两个标记都显式 pin 而非 lazy 读状态表，防止帧在队期间
-        // 新一轮 reasoning 复位状态导致标记帧丢失语义），让端侧及时收起思维链
-        // 面板；空文本 + append:true 对端侧已有内容无副作用。
+        // SDK thinking_end：标记本 turn reasoning 结束，并补发思考块结束标记帧
+        // （携带本思考块的全量文本、append=false 快照语义、isReasoningFinished=true
+        // + lastChunk=true；两个标记都显式 pin 而非 lazy 读状态表，防止帧在队
+        // 期间新一轮 reasoning 复位状态导致标记帧丢失语义），让端侧及时收起
+        // 思维链面板并落定该块的完整内容。
         const endTaskId = getActiveTaskId();
         markReasoningFinished(endTaskId);
         // 攒入思考文本块的 taskUniqIndexId：统一在终态汇总卡（text=任务处理
@@ -708,6 +714,9 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
         scopedLog().log(`[REASONING-END] Reasoning finished, taskId=${endTaskId}`);
 
         try {
+          // 结束标记帧携带本思考块的全量文本（append=false 快照语义），
+          // 值在入队时捕获 —— 防止 drain 前新一轮 reasoning 更新了快照
+          const reasoningFullText = lastReasoningText;
           outboundQueue.enqueue({
             taskId: endTaskId,
             label: "reasoning-end",
@@ -717,8 +726,8 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 sessionId,
                 taskId: endTaskId,
                 messageId: getActiveMessageId(),
-                text: "",
-                append: true,
+                text: reasoningFullText,
+                append: false,
                 isReasoningFinished: true,
                 lastChunk: true,
               }),

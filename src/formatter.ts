@@ -233,17 +233,11 @@ export async function sendReasoningTextUpdate(params: SendReasoningTextUpdatePar
   };
 
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
-  const loggedReasoningText = (artifact.artifact.parts[0] as any)?.reasoningText ?? "";
-  // 思维链日志：[A2A-OUT] 只打 lastChunk/final 帧，思维链流式中间帧的内容
-  // 只在这里可见（append=false 全量快照，每帧打印当前快照全文；已脱敏）。
-  // 结束标记帧（lastChunk=true）打印关键字段 + 完整帧。
+  // 思考块结束标记帧（lastChunk=true）打印完整帧日志，便于核查思考块结束链路
+  // （流式中间帧不打印，避免刷屏；parts 已在组帧时脱敏）
   if (artifact.lastChunk) {
     log.log(
       `[A2A_REASONING] reasoning lastChunk frame sent, streamingTextId=${artifact.streamingTextId}, taskUniqIndexId=${artifact.taskUniqIndexId}, isReasoningFinished=${artifact.isReasoningFinished}, payload=${JSON.stringify(jsonRpcResponse)}`,
-    );
-  } else {
-    log.log(
-      `[A2A_REASONING] reasoning stream, streamingTextId=${artifact.streamingTextId}, taskUniqIndexId=${artifact.taskUniqIndexId}, len=${loggedReasoningText.length}, text=${loggedReasoningText}`,
     );
   }
 }
