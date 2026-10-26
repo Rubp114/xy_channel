@@ -443,7 +443,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     sessionId,
                     taskId: terminalTaskId,
                     messageId: terminalMessageId,
-                    text: "思考已完成",
+                    text: "已完成深度思考",
                     state: "completed",
                   }),
               });
@@ -733,7 +733,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
               }),
           });
 
-          // 思考块结束后紧跟一帧 status-update（"思考已完成"），
+          // 思考块结束后紧跟一帧 status-update（"已完成深度思考"），
           // 每个思考块结束时都发；正文完成后不再发（终态帧文案另见
           // terminal-status）。state=working：turn 仍在进行。
           outboundQueue.enqueue({
@@ -745,7 +745,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 sessionId,
                 taskId: endTaskId,
                 messageId: getActiveMessageId(),
-                text: "思考已完成",
+                text: "已完成深度思考",
                 state: "working",
               }),
           });

@@ -535,7 +535,7 @@ export function clearWaitState(sessionId: string, reason: string, taskId?: strin
 /**
  * 当所有 subagent 完成且父 turn 已 settle 时，由 manager 发送终态帧并真正
  * 结束当前 A2A session：
- *   1. completed 状态帧（"思考已完成"）→ final:true 全文本帧（合并
+ *   1. completed 状态帧（"已完成深度思考"）→ final:true 全文本帧（合并
  *      completionTexts）——与 reply-dispatcher 正常终态同序，xy_tester
  *      与客户端依赖该顺序
  *   2. 清理等待态、停止心跳、移除任务链
@@ -601,7 +601,7 @@ export async function deliverSubagentFinalResult(params: {
       sessionId: state.sessionId,
       taskId: effectiveTaskId,
       messageId: effectiveMessageId,
-      text: "思考已完成",
+      text: "已完成深度思考",
       state: "completed",
     });
   // 正文文本完成帧（lastChunk=true, final=false）：权威全文本在此下发，
