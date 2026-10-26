@@ -341,28 +341,9 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
           scopedLog().log(
             `[ON-IDLE] Waiting for subagent completions ${waitState.deliveredCompletions}/${waitState.expectedCompletions}, suppressing final:true`,
           );
-          // 会话不结束：转入 waiting-subagent，心跳由对话管理层继续维持
+          // 会话不结束：转入 waiting-subagent。状态保活帧已全部下线 ——
+          // 此处不再下发等待保活帧，心跳也不再启动（startStatusHeartbeat 为 no-op）。
           setSessionState(sessionId, "waiting-subagent");
-          // 🔑 保活帧必须使用最新 A2A 身份：steer 场景下旧 taskId 已被服务端
-          // 作废，用旧身份发帧无任何回应。读任务链末尾（新 dispatcher 场景下
-          // 与本 dispatcher 闭包 taskId 一致；旧 dispatcher 晚到触发时除外）。
-          const aliveTaskId = getActiveTaskId();
-          const aliveMessageId = getActiveMessageId();
-          outboundQueue.enqueue({
-            taskId: aliveTaskId,
-            label: "subagent-waiting-status",
-            send: () =>
-              sendStatusUpdate({
-                config,
-                sessionId,
-                taskId: aliveTaskId,
-                messageId: aliveMessageId,
-                text: "思考中",
-                state: "working",
-                logFullFrame: true, // 保活帧打印完整 A2A 帧
-              }),
-          });
-          // 心跳由对话管理层拥有，subagent 等待期间自动存活，无需附加到等待态
           return;
         }
         // If wait state exists and all subagents are already complete,

@@ -299,25 +299,26 @@ export function getCachedXYConfig(): unknown {
   return _g.__xyConversationCachedConfig;
 }
 
-// ─── 30s 状态心跳（manager 拥有，独立于 dispatcher 生命周期） ──
+// ─── 30s 保活卡（manager 拥有，独立于 dispatcher 生命周期） ──
 
-const STATUS_HEARTBEAT_INTERVAL_MS = 30 * 1000;
-const DEFAULT_STATUS_TEXT = "思考中";
+const STATUS_KEEPALIVE_INTERVAL_MS = 30 * 1000;
 
 /**
- * 启动（或重启）session 的 30s 状态心跳。
+ * 启动（或重启）session 的 30s 保活卡心跳。
  * 心跳由 manager 拥有：dispatcher 销毁不影响心跳；
  * tick 时读取任务链末尾的当前 taskId/messageId。
+ * 每 30s 下发一张单独的 DisplayTaskCardData（不配对状态卡）：
+ * stepName="任务正在处理中，请稍候"，index/taskUniqIndexId 取当前状态卡序号，
+ * isFinal=false，其余字段沿用现有 DisplayTaskCardData 结构。
  */
-export function startStatusHeartbeat(sessionId: string, text: string = DEFAULT_STATUS_TEXT): void {
+export function startStatusHeartbeat(sessionId: string): void {
   const session = getOrCreateSession(sessionId);
   if (session.statusTimer) {
     clearInterval(session.statusTimer);
   }
-  logger.withContext(sessionId, "").log(`[STATUS-HEARTBEAT] Starting manager-owned heartbeat, text="${text}"`);
+  logger.withContext(sessionId, "").log(`[STATUS-HEARTBEAT] Starting manager-owned keepalive card heartbeat`);
   session.statusTimer = setInterval(() => {
-    // 终态/收尾中不再发保活帧：终态帧（"思考已完成" completed）发出后
-    // 若再发保活帧（working），端侧会看到同 streamingTextId 的状态回退
+    // 终态/收尾中不再发保活卡
     if (session.state !== "working" && session.state !== "waiting-subagent") {
       return;
     }
@@ -326,18 +327,18 @@ export function startStatusHeartbeat(sessionId: string, text: string = DEFAULT_S
     if (!current || !config) {
       return;
     }
-    void sendStatusUpdate({
+    void sendDisplayTaskCardData({
       config,
       sessionId,
       taskId: current.taskId,
       messageId: current.messageId,
-      text,
-      state: "working",
-      logFullFrame: true, // 保活帧打印完整 A2A 帧（核查 streamingTextId 等字段）
+      index: getCurrentStatusCardSeq(current.taskId),
+      stepName: "任务正在处理中，请稍候",
+      isFinal: false,
     }).catch((err) => {
-      logger.withContext(sessionId, current.taskId).error(`Failed to send status update:`, err);
+      logger.withContext(sessionId, current.taskId).error(`Failed to send keepalive card:`, err);
     });
-  }, STATUS_HEARTBEAT_INTERVAL_MS);
+  }, STATUS_KEEPALIVE_INTERVAL_MS);
 }
 
 export function stopStatusHeartbeat(sessionId: string): void {
