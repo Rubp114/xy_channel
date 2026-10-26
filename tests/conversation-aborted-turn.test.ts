@@ -1,76 +1,61 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  completeTask,
+  deleteSession,
   getOrCreateSession,
   getSession,
-  markTurnAborted,
-  consumeAbortedTurnSuppression,
-  clearAbortedTurnSuppression,
-  deleteSession,
+  isTurnCanceled,
+  isTurnSuperseded,
+  listSessions,
+  markTurnCanceled,
+  markTurnInflight,
+  registerTask,
 } from "../src/conversation/conversation-manager.js";
 
-const _g = globalThis as Record<string, unknown>;
-
-describe("conversation aborted-turn suppression", () => {
+describe("conversation turn lifecycle", () => {
   afterEach(() => {
-    const sessions = _g.__xyConversationSessions as
-      | Map<string, unknown>
-      | undefined;
-    sessions?.clear();
+    for (const session of listSessions()) {
+      deleteSession(session.sessionId);
+    }
   });
 
-  it("markTurnAborted_recordsMarkerOnSession", () => {
-    const sessionId = "sess-abort-1";
-    markTurnAborted(sessionId, "task-100");
+  it("cancel marks only the owning turn, without a next-turn suppression marker", () => {
+    const session = getOrCreateSession("sess-cancel");
+    registerTask(session.sessionId, "task-old", "message-old");
 
-    const session = getSession(sessionId);
-    expect(session).not.toBeNull();
-    expect(session?.abortedTurn).toBeDefined();
-    expect(session?.abortedTurn?.taskId).toBe("task-100");
-    expect(typeof session?.abortedTurn?.abortedAt).toBe("number");
+    markTurnCanceled(session.sessionId, "task-old");
+
+    expect(isTurnCanceled(session.sessionId, "task-old")).toBe(true);
+    expect(isTurnCanceled(session.sessionId, "task-new")).toBe(false);
+    expect((session as any).abortedTurn).toBeUndefined();
   });
 
-  it("consumeAbortedTurnSuppression_returnsTrueOnceThenClears", () => {
-    const sessionId = "sess-abort-2";
-    markTurnAborted(sessionId, "task-100");
+  it("only a newer dispatcher supersedes the old turn", () => {
+    const sessionId = "sess-superseded";
+    registerTask(sessionId, "task-old", "message-old");
+    markTurnInflight(sessionId, "task-old");
+    expect(isTurnSuperseded(sessionId, "task-old")).toBe(false);
 
-    expect(consumeAbortedTurnSuppression(sessionId)).toBe(true);
-    // 一次性语义：消费后标记清除，后续不再触发。
-    expect(consumeAbortedTurnSuppression(sessionId)).toBe(false);
-    expect(getSession(sessionId)?.abortedTurn).toBeUndefined();
+    // Direct steer adds an A2A task but no dispatcher, so the original turn
+    // remains the output owner and may reply using the latest A2A identity.
+    registerTask(sessionId, "task-steered", "message-steered");
+    expect(isTurnSuperseded(sessionId, "task-old")).toBe(false);
+
+    // A fallback dispatch creates a new owner; the old dispatcher becomes stale.
+    markTurnInflight(sessionId, "task-steered");
+    expect(isTurnSuperseded(sessionId, "task-old")).toBe(true);
+    expect(isTurnSuperseded(sessionId, "task-steered")).toBe(false);
   });
 
-  it("consumeAbortedTurnSuppression_noMarkerReturnsFalse", () => {
-    const sessionId = "sess-abort-3";
-    getOrCreateSession(sessionId);
-    expect(consumeAbortedTurnSuppression(sessionId)).toBe(false);
-  });
+  it("old-turn cleanup cannot remove the newer task binding", () => {
+    const sessionId = "sess-cleanup";
+    registerTask(sessionId, "task-old", "message-old");
+    registerTask(sessionId, "task-new", "message-new");
+    markTurnInflight(sessionId, "task-old");
+    markTurnInflight(sessionId, "task-new");
 
-  it("clearAbortedTurnSuppression_canResetMarkerWithoutSideEffect", () => {
-    const sessionId = "sess-abort-5";
-    markTurnAborted(sessionId, "task-100");
-    clearAbortedTurnSuppression(sessionId);
-    expect(getSession(sessionId)?.abortedTurn).toBeUndefined();
-    // 清除后再消费必然为 false。
-    expect(consumeAbortedTurnSuppression(sessionId)).toBe(false);
-  });
+    completeTask(sessionId, "task-old");
 
-  it("clearAbortedTurnSuppression_noMarkerIsNoOp", () => {
-    const sessionId = "sess-abort-6";
-    getOrCreateSession(sessionId);
-    expect(() => clearAbortedTurnSuppression(sessionId)).not.toThrow();
-  });
-
-  it("consumingAfterClearThenInjectOnce_returnsFalse", () => {
-    const sessionId = "sess-abort-7";
-    markTurnAborted(sessionId, "task-100");
-    clearAbortedTurnSuppression(sessionId);
-    expect(consumeAbortedTurnSuppression(sessionId)).toBe(false);
-  });
-
-  it("deleteSession_clearsRegistry", () => {
-    const sessionId = "sess-abort-4";
-    getOrCreateSession(sessionId);
-    deleteSession(sessionId);
-    expect(getSession(sessionId)).toBeNull();
+    expect(getSession(sessionId)?.tasks.map((task) => task.taskId)).toEqual(["task-new"]);
   });
 });

@@ -36,9 +36,10 @@ import {
   markParentSettled,
   markTurnInflight,
   clearTurnInflight,
-  markTurnAborted,
-  consumeAbortedTurnSuppression,
-  clearAbortedTurnSuppression,
+  markTurnCanceled,
+  isTurnCanceled,
+  isTurnSuperseded,
+  getCurrentDispatchTaskId,
   cacheXYConfig,
   getCurrentTaskId,
   clearWaitState,
@@ -56,8 +57,10 @@ export interface HandleXYMessageParams {
   message: A2AJsonRpcRequest;
   accountId: string;
   webSocketSessionId?: string; // 可选：WebSocket 层级的 sessionId，用于保存 .xiaoyiruntime
-  /** Called after dispatch init is complete (agentTools/wrapStreamFn done). */
-  onInitComplete?: () => void;
+  /** 在实际 dispatch 初始化前获取全局门，初始化完成后释放。 */
+  acquireDispatchInitGate?: () => Promise<() => void>;
+  /** steer 回退前等待同 session 的旧 dispatch 收尾，避免并发争用会话写锁。 */
+  waitForPreviousTurn?: () => Promise<void>;
 }
 
 /**
@@ -87,9 +90,6 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       }
       const log = logger.withContext(sessionId, "");
       log.log(`[BOT] Clear context request`);
-      // 清空上下文即确认废弃旧状态：一并清除"最近被中止 turn"标记，
-      // 避免清空后第一条消息误带"忽略上一轮"抑制指令（上下文已无旧轮可补答）。
-      clearAbortedTurnSuppression(sessionId);
       const config = resolveXYConfig(cfg);
       await sendClearContextResponse({
         config,
@@ -129,13 +129,17 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       } else {
         const activeRun = resolveActiveEmbeddedRunSessionId(sessionKey);
         if (activeRun) {
+          const ownerTaskId = getCurrentDispatchTaskId(sessionId) ?? getCurrentTaskId(sessionId) ?? taskId;
           const aborted = abortAgentHarnessRun(activeRun);
           log.log(`[TASKS_CANCEL] aborted active run=${activeRun} result=${aborted}`);
           if (aborted) {
-            // 标记该会话的上一轮被用户"停止"：下一条真实用户消息派发前
-            // 将注入"忽略被取消轮次"抑制指令，防止被中止的 T-1 轮内容
-            // 泄漏到下一轮回答。
-            markTurnAborted(sessionId, taskId);
+            // tasks/cancel 已有 canceled 终态响应；旧 turn 后续不得再发失败/正文帧。
+            // 该标记只控制输出生命周期，绝不修改下一条消息的上下文。
+            markTurnCanceled(sessionId, ownerTaskId);
+            const session = getSession(sessionId);
+            for (const entry of session?.tasks ?? []) {
+              session?.outboundQueue.purge(entry.taskId);
+            }
           }
         } else {
           log.log(`[TASKS_CANCEL] No active embedded run for sessionKey, nothing to abort`);
@@ -197,14 +201,13 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     }
     // ========================================
 
-    // 🔑 注册taskId（检测是否是已有活跃任务的 session）
+    // 🔑 先判断是否已有任务；新 task 的身份在 steer 成败明确后再注册，
+    // 避免回退期间旧 turn 把输出误挂到新 taskId。
     const isUpdate = hasActiveTask(parsed.sessionId);
 
     if (isUpdate) {
       log.log(`[BOT] STEER MODE - Second message detected, new taskId=${parsed.taskId}`);
     }
-
-    registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
 
     // Extract and update push_id if present
     const pushId = extractPushId(parsed.parts);
@@ -366,20 +369,6 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     const text = extractTextFromParts(parsed.parts);
     let textForAgent = text || "";
 
-    // ── 停止后首轮上下文隔离（suppress aborted turn carry-over） ──
-    // 若上一轮被用户"停止"（tasks/cancel 中止了在途 run，见 markTurnAborted），
-    // 则在本次派发前给消息注入一条抑制指令：提示模型完全忽略被取消的上一轮
-    // 及其未完成输出，只回答用户最新问题。openclaw 的会话 transcript 以 sqlite
-    // 存储，插件侧无法安全回滚已提交内容，故在提示词层做上下文隔离。
-    // 一次性语义：消费后标记立即清除，后续消息不会再携带该指令。
-    if (consumeAbortedTurnSuppression(parsed.sessionId)) {
-      textForAgent =
-        `【系统提示】用户已点击"停止"中止了上一条请求，该请求及其未完成的输出` +
-        `已作废，请完全忽略它，不要重提、补答、继续或联想上一轮被取消的内容。` +
-        `现在请只针对下面用户最新提出的问题作答。\n` +
-        `最新问题：${textForAgent}`;
-      log.log(`[TURN-ABORTED] Prepended next-turn suppression instruction`);
-    }
     // Self-evolution keyword nudge — only for real user messages
     if (route.sessionKey && textForAgent) {
       try {
@@ -430,9 +419,8 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     // admitReplyTurn which would otherwise block the steer message until the
     // first message completes — making steer indistinguishable from a followup.
     //
-    // 直接注入失败时，落回普通 tasks/send 派发作为全新 turn（不再使用
-    // /steer 命令体 + steered dispatcher 兜底）：此时旧 run 已结束，用户侧
-    // 感知对话连续（新 turn 立即发送自己的 working 状态帧）。
+    // 直接注入失败时，先等旧 dispatch 收尾，再落回普通 tasks/send 派发：
+    // 活跃 run 已关闭或正在退出时，避免新旧 turn 并发争用 session 写锁。
     if (isUpdate && route.sessionKey) {
       const steerResult = tryDirectSteer({
         sessionId: parsed.sessionId,
@@ -441,6 +429,7 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         source: "user",
       });
       if (steerResult.ok) {
+        registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
         log.log(`[BOT-STEER] Direct steer succeeded — message injected into active run`);
         // Steer message taskId stays in the binding so getActiveTaskId()
         // resolves to the latest taskId for onPartialReply replies.
@@ -449,7 +438,12 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         return;
       }
       const steerFailReason = (steerResult as { reason: string }).reason;
-      log.log(`[BOT-STEER] Direct steer failed (${steerFailReason}), re-dispatching as a new turn`);
+      log.log(`[BOT-STEER] Direct steer failed (${steerFailReason}), waiting for previous turn before re-dispatch`);
+      // 队列关闭或 run 已消失时，旧 dispatch 仍可能持有 session 写锁。
+      // 等它完成收尾再开新 turn，避免并发写锁竞争和 60s 超时。
+      await params.waitForPreviousTurn?.();
+      registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
+      log.log(`[BOT-STEER] Previous turn settled, re-dispatching as a new turn`);
 
       // 🔑 steer 失败重分发前重绑 sessionKey → 本消息的 A2A 身份。
       // 首条消息绑定刻意不被 steer 覆盖（见上方 bindSessionKey 注释），但那会让
@@ -466,6 +460,10 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         bindSessionKey(route.sessionKey, parsed.sessionId, parsed.taskId, parsed.messageId);
         log.log(`[BOT-STEER] Rebound sessionKey to new taskId (no active run, no pending subagent wait)`);
       }
+    }
+
+    if (!isUpdate) {
+      registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
     }
 
     // Resolve envelope format options (following feishu pattern)
@@ -520,15 +518,21 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       cleaned = true;
       log.log(`[BOT] Cleanup started`);
       // Check for pending subagent wait on this session
-      const pendingWait = getWaitState(parsed.sessionId, parsed.taskId) ??
-        (hasWaitState(parsed.sessionId) ? { deliveredCompletions: 0, expectedCompletions: 1 } : null);
+      const superseded = isTurnSuperseded(parsed.sessionId, parsed.taskId);
+      const canceled = isTurnCanceled(parsed.sessionId, parsed.taskId);
+      const pendingWait = !superseded && !canceled
+        ? getWaitState(parsed.sessionId, parsed.taskId) ??
+          (hasWaitState(parsed.sessionId) ? { deliveredCompletions: 0, expectedCompletions: 1 } : null)
+        : null;
       if (pendingWait && pendingWait.deliveredCompletions < pendingWait.expectedCompletions) {
         // Subagent wait active — skip cleanup, session stays alive
         log.log(`[BOT] Cleanup suppressed — subagent wait active on session, taskId=${parsed.taskId}`);
         cleaned = false;
         return;
       }
-      completeTask(parsed.sessionId);
+      // 被新 dispatcher 接替的旧 turn 只移除自己的身份；当前 turn（含直接
+      // steer 合并进原 dispatcher 的新 task）仍由本 dispatcher 统一收尾。
+      completeTask(parsed.sessionId, superseded ? parsed.taskId : undefined);
       log.log(`[BOT] Cleanup completed`);
     };
 
@@ -542,11 +546,8 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       onIdleComplete: cleanup,
     });
 
-    // Steer messages don't need a status interval — the first message's
-    // dispatcher already has one running.
-    if (!isUpdate) {
-      startStatusInterval();
-    }
+    // 每个新 dispatcher 都接管心跳；直接 steer 不创建 dispatcher，沿用原心跳。
+    startStatusInterval();
 
     // Build session context for AsyncLocalStorage
     const sessionContext = {
@@ -578,6 +579,14 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         // 🔑 兜底清除本 turn 在途标记（正常路径 onIdle 入口已清除；onIdle
         // 未执行的异常路径靠此处，避免时机门控永久推迟 subagent 终态帧）。
         clearTurnInflight(parsed.sessionId, parsed.taskId);
+
+        if (
+          isTurnSuperseded(parsed.sessionId, parsed.taskId) ||
+          isTurnCanceled(parsed.sessionId, parsed.taskId)
+        ) {
+          log.log(`[BOT] Ignoring settled callback for canceled/superseded turn`);
+          return;
+        }
 
         // Subagent wait state: if parent has pending subagents, mark settled
         // and defer finalization. Cleanup is suppressed so the session stays alive.
@@ -615,36 +624,36 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         // cleanup 已由 onIdleComplete 在 onIdle 的 finally 中执行。
         // onSettled 不做任何清理（直接在这里清理会发生 race condition）。
       },
-      run: () => {
-        // 🔐 Use AsyncLocalStorage to provide session context to tools.
-        // runWithSessionContext returns after the sync part of dispatch
-        // (including agentTools + wrapStreamFn) has executed, so we
-        // signal init complete to release the global dispatch gate
-        // for the next session.
-        const dispatchPromise = runWithSessionContext(sessionContext, async () => {
-          log.log(`[ALS-PROOF] bot entered dispatch scope sessionId=${(sessionContext as any).sessionId} taskId=${(sessionContext as any).taskId} isSteer=${isUpdate}`);
-          log.log(`[BOT-DISPATCH] dispatchReplyFromConfig starting, body.length=${(ctxPayload.Body as string)?.length ?? 0}`);
-          try {
-            const result = await core.channel.reply.dispatchReplyFromConfig({
-              ctx: ctxPayload,
-              cfg,
-              dispatcher,
-              replyOptions,
-            });
+      run: async () => {
+        const releaseDispatchInitGate = params.acquireDispatchInitGate
+          ? await params.acquireDispatchInitGate()
+          : () => {};
+        try {
+          // 仅在 dispatch 初始化期间持有全局门；长任务执行与 steer 回退等待不占门。
+          const dispatchPromise = runWithSessionContext(sessionContext, async () => {
+            log.log(`[ALS-PROOF] bot entered dispatch scope sessionId=${(sessionContext as any).sessionId} taskId=${(sessionContext as any).taskId} isSteer=${isUpdate}`);
+            log.log(`[BOT-DISPATCH] dispatchReplyFromConfig starting, body.length=${(ctxPayload.Body as string)?.length ?? 0}`);
+            try {
+              const result = await core.channel.reply.dispatchReplyFromConfig({
+                ctx: ctxPayload,
+                cfg,
+                dispatcher,
+                replyOptions,
+              });
 
-            log.log(`[BOT-DISPATCH] dispatchReplyFromConfig returned, result=${JSON.stringify(result)}`);
+              log.log(`[BOT-DISPATCH] dispatchReplyFromConfig returned, result=${JSON.stringify(result)}`);
 
-            return result;
-          } catch (dispatchErr) {
-            log.error(`[BOT-DISPATCH] dispatchReplyFromConfig threw: ${dispatchErr instanceof Error ? `${dispatchErr.name}: ${dispatchErr.message}` : String(dispatchErr)}`, dispatchErr instanceof Error ? dispatchErr.stack?.slice(0, 500) : undefined);
-            throw dispatchErr;
-          }
-        });
+              return result;
+            } catch (dispatchErr) {
+              log.error(`[BOT-DISPATCH] dispatchReplyFromConfig threw: ${dispatchErr instanceof Error ? `${dispatchErr.name}: ${dispatchErr.message}` : String(dispatchErr)}`, dispatchErr instanceof Error ? dispatchErr.stack?.slice(0, 500) : undefined);
+              throw dispatchErr;
+            }
+          });
 
-        // Signal init complete — sync part (agentTools, wrapStreamFn) is done
-        params.onInitComplete?.();
-
-        return dispatchPromise;
+          return dispatchPromise;
+        } finally {
+          releaseDispatchInitGate();
+        }
       },
     });
 
@@ -669,7 +678,7 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         errLog.log(`[BOT] Cleaning up after error`);
 
         // 清理 taskId
-        completeTask(sessionId);
+        completeTask(sessionId, isTurnSuperseded(sessionId, errTaskId) ? errTaskId : undefined);
         // 清理在途标记（dispatch 中途异常时 onIdle/onSettled 可能未执行，
         // 避免残留标记让 subagent 终态帧的时机门控永久推迟）
         if (errTaskId) {

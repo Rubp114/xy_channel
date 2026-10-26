@@ -18,6 +18,8 @@ import {
   stopStatusHeartbeat,
   setSessionState,
   clearTurnInflight,
+  isTurnCanceled,
+  isTurnSuperseded,
   deliverSubagentFinalResult,
 } from "../conversation/conversation-manager.js";
 import { StreamAssembler } from "../conversation/stream-assembler.js";
@@ -269,6 +271,20 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
     stopStatusHeartbeat(sessionId);
   };
 
+  const isOutputStale = (): boolean =>
+    isTurnCanceled(sessionId, taskId) || isTurnSuperseded(sessionId, taskId);
+
+  const finishIdle = async (preserveHeartbeat: boolean): Promise<void> => {
+    if (!preserveHeartbeat) {
+      stopStatusInterval();
+    }
+    // 仅卸载本 dispatcher 的 assembler，避免误删 steer 新 dispatcher 的实例。
+    if (session.assembler === assembler) {
+      session.assembler = undefined;
+    }
+    await onIdleComplete?.();
+  };
+
   const { dispatcher, replyOptions, markDispatchIdle } =
     core.channel.reply.createReplyDispatcherWithTyping({
       responsePrefix: prefixContext.responsePrefix,
@@ -280,6 +296,10 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
       },
 
       deliver: async (payload: ReplyPayload, info) => {
+        if (isOutputStale()) {
+          scopedLog().log(`[DELIVER SKIP] Canceled/superseded turn`);
+          return;
+        }
         let text = payload.text ?? "";
 
         // 将 compaction 通知替换为中文提示
@@ -348,6 +368,10 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
       },
 
       onError: async (err, info) => {
+        if (isOutputStale()) {
+          scopedLog().log(`[ON-ERROR] Ignoring error from canceled/superseded turn: ${String(err)}`);
+          return;
+        }
         runtime.error?.(`xy: ${info.kind} reply failed: ${String(err)}`);
         stopStatusInterval();
 
@@ -376,6 +400,18 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
         // 🔑 本 turn 不再产生流式帧：清除在途标记，放行 subagent 终态帧的
         // 时机门控（见 conversation-manager.deliverSubagentFinalResult）。
         clearTurnInflight(sessionId, taskId);
+
+        // 取消的 turn 已由 tasks/cancel 回复 canceled；被新 dispatcher 接替的
+        // 旧 turn 也不得发送失败/成功终帧，尤其不能动态挂到新 taskId。
+        if (isOutputStale()) {
+          const superseded = isTurnSuperseded(sessionId, taskId);
+          scopedLog().log(`[ON-IDLE] Suppressing terminal output for canceled/superseded turn`);
+          if (!superseded) {
+            setSessionState(sessionId, "canceled");
+          }
+          await finishIdle(superseded);
+          return;
+        }
 
         // ── Subagent wait state check ─────────────────────────────
         // If this session has pending subagent completions, suppress final:true
@@ -447,6 +483,12 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
             // void fire-and-forget 调用 onPartialReply，onIdle 触发时最后一个
             // 回调可能仍在 streamChain 上排队；提前读取会缺最后几个流式块。
             await streamChain;
+
+            // 等待流式回调期间可能被取消或被新 turn 接替；重新检查后再组终帧。
+            if (isOutputStale()) {
+              scopedLog().log(`[ON-IDLE] Turn became canceled/superseded while draining stream callbacks`);
+              return;
+            }
 
             // 🔑 终态帧延迟会让出宏任务，期间新用户消息可能把 session 绑定
             // 更新到新 task，必须提前捕获 taskId/messageId，避免终态帧误挂到
@@ -621,18 +663,9 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
             }
           }
         } finally {
-          stopStatusInterval();
-
-          // 卸载 assembler（终态后工具不再有注入窗口）；仅在仍属于本
-          // dispatcher 时卸载，避免误删 steer 新 dispatcher 的实例。
-          if (session.assembler === assembler) {
-            session.assembler = undefined;
-          }
-
-          // 🔑 清理必须在 onIdle 内部完成，因为 openclaw 的 waitForIdle() 不会
-          // await onIdle 返回的 Promise（源码中为 void options.onIdle?.()），
-          // 导致 onSettled 在 onIdle 的 async 工作完成之前就执行。
-          await onIdleComplete?.();
+          // openclaw 的 waitForIdle() 不 await onIdle；清理必须在这里完成。
+          // 旧 turn 被新 dispatcher 接替时保留新 turn 的心跳。
+          await finishIdle(isTurnSuperseded(sessionId, taskId));
         }
       },
 
@@ -653,6 +686,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
       onModelSelected: prefixContext.onModelSelected,
 
       onToolStart: async ({ name, phase }) => {
+        if (isOutputStale()) return;
         scopedLog().log(`[TOOL-START] Tool: ${name}, phase: ${phase}`);
 
         if (phase === "start") {
@@ -688,6 +722,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
       },
 
       onToolResult: async (payload: ReplyPayload) => {
+        if (isOutputStale()) return;
         const text = payload.text ?? "";
         const hasMedia = Boolean(payload.mediaUrl || (payload.mediaUrls?.length ?? 0) > 0);
 
@@ -719,6 +754,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
       },
 
       onReasoningStream: async (payload: ReplyPayload) => {
+        if (isOutputStale()) return;
         let text = payload.text ?? "";
 
         // Strip "Reasoning:" prefix that some reasoning models add to their thinking output
@@ -750,6 +786,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
       },
 
       onPartialReply: async (payload: ReplyPayload) => {
+        if (isOutputStale()) return;
         const text = payload.text ?? "";
         if (text.length === 0) return;
 
@@ -766,6 +803,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
 
         try {
           await prevChain;
+          if (isOutputStale()) return;
 
           // assembler 内部完成 startsWith 边界检测与跨调用锁存（含轮间换行）
           const { fullText } = assembler.onStreamText(text);

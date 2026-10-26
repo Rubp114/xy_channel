@@ -179,6 +179,7 @@ export function markTurnInflight(sessionId: string, taskId: string): void {
     session.inflightTurns = new Set();
   }
   session.inflightTurns.add(taskId);
+  session.latestDispatchTaskId = taskId;
 }
 
 /** turn 不再产生流式帧时清除在途标记（onIdle 入口 / onSettled 兜底）。 */
@@ -193,59 +194,29 @@ function hasInflightTurn(sessionId: string): boolean {
   return (session?.inflightTurns?.size ?? 0) > 0;
 }
 
-// ─── 被中止 turn 跟踪（停止后首轮上下文抑制） ───────────────
+// ─── Turn 生命周期（取消 / 被新 dispatch 接替） ─────────────────
 
-/**
- * 标记 session 的某轮 turn 被用户"停止"（tasks/cancel）中止。
- * 用于在随后第一条真实用户消息派发前注入"忽略被取消轮次"抑制指令，
- * 防止被中止的 T-1 轮内容（已提交进 openclaw sqlite transcript）泄漏到
- * 下一轮回答。仅最后一个任务会被保留（同轮重复 cancel 视为同一次中止）。
- */
-export function markTurnAborted(sessionId: string, taskId: string): void {
+/** 最近创建 dispatcher 的 taskId；直接 steer 不创建 dispatcher，不会改写它。 */
+export function getCurrentDispatchTaskId(sessionId: string): string | null {
+  return sessions.get(sessionId)?.latestDispatchTaskId ?? null;
+}
+
+/** 旧 dispatcher 已被新 dispatcher 接替后，不得再发送正文或终态帧。 */
+export function isTurnSuperseded(sessionId: string, taskId: string): boolean {
+  const latestTaskId = sessions.get(sessionId)?.latestDispatchTaskId;
+  return latestTaskId !== undefined && latestTaskId !== taskId;
+}
+
+/** 记录取消仅用于阻止该 turn 的后续输出，不向下一条消息注入任何提示。 */
+export function markTurnCanceled(sessionId: string, taskId: string): void {
   const session = getOrCreateSession(sessionId);
-  session.abortedTurn = { taskId, abortedAt: Date.now() };
+  session.canceledTurnIds.add(taskId);
   session.lastActivityAt = Date.now();
-  logger
-    .withContext(sessionId, taskId)
-    .log(`[TURN-ABORTED] Recorded aborted turn for next-turn suppression`);
+  logger.withContext(sessionId, taskId).log(`[TURN-CANCELED] Marked turn as canceled`);
 }
 
-/**
- * 取走并消费"最近被中止 turn"标记。
- * 在派发一条新的真实用户消息前调用：若存在被中止 turn（说明上一条被停止），
- * 返回 true 并清除标记，调用方应在消息文本前注入"忽略被取消轮次"抑制指令。
- * 多次注入已消费（一次性语义，避免后续消息反复携带抑制指令）。
- */
-export function consumeAbortedTurnSuppression(sessionId: string): boolean {
-  const session = sessions.get(sessionId);
-  if (!session?.abortedTurn) {
-    return false;
-  }
-  const marker = session.abortedTurn;
-  session.abortedTurn = undefined;
-  session.lastActivityAt = Date.now();
-  logger
-    .withContext(sessionId, marker.taskId)
-    .log(`[TURN-ABORTED] Consumed aborted-turn marker, injecting next-turn suppression`);
-  return true;
-}
-
-/**
- * 清除"最近被中止 turn"标记（无则 no-op）。
- * 用于 clearContext 等会重置上下文的场景：上下文已清空后不再需要"忽略上一轮"
- * 抑制指令，避免残留标记让清空后的第一条消息误带一次该指令。
- */
-export function clearAbortedTurnSuppression(sessionId: string): void {
-  const session = sessions.get(sessionId);
-  if (!session?.abortedTurn) {
-    return;
-  }
-  const marker = session.abortedTurn;
-  session.abortedTurn = undefined;
-  session.lastActivityAt = Date.now();
-  logger
-    .withContext(sessionId, marker.taskId)
-    .log(`[TURN-ABORTED] Cleared aborted-turn marker (context reset)`);
+export function isTurnCanceled(sessionId: string, taskId: string): boolean {
+  return sessions.get(sessionId)?.canceledTurnIds.has(taskId) ?? false;
 }
 
 // ─── SessionKey ↔ SessionId 索引 ──────────────────────────────

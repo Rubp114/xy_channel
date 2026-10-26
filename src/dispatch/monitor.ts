@@ -87,6 +87,8 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
 
   // Track active message processing to detect duplicates
   const activeMessages = new Set<string>();
+  // 每个 session 已开始的处理 Promise；仅 steer 回退时等待旧 dispatch 收尾。
+  const activeTurnTasks = new Map<string, Set<Promise<void>>>();
 
   // Create session queue for ordered message processing
   const enqueue = createSessionQueue();
@@ -97,6 +99,13 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
   // This prevents lastRegisteredKey races when multiple sessions initialize
   // concurrently.
   let globalDispatchInitGate: Promise<void> = Promise.resolve();
+  const acquireDispatchInitGate = async (): Promise<() => void> => {
+    const previous = globalDispatchInitGate;
+    let release!: () => void;
+    globalDispatchInitGate = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    return release;
+  };
 
   // Health check interval
   let healthCheckInterval: NodeJS.Timeout | null = null;
@@ -117,14 +126,9 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
       }
 
       activeMessages.add(messageKey);
+      const previousTurnTasks = Array.from(activeTurnTasks.get(sessionId) ?? []);
 
       const task = async () => {
-        // Wait for the previous session's init to complete (global gate),
-        // then acquire the gate for this session's init.
-        await globalDispatchInitGate;
-        let releaseGate: () => void;
-        globalDispatchInitGate = new Promise<void>((r) => { releaseGate = r; });
-
         try {
           await handleXYMessage({
             cfg,
@@ -132,29 +136,45 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
             message,
             accountId,  // ✅ Pass accountId ("default")
             webSocketSessionId: sessionId,  // ✅ 传递 WebSocket 层级的 sessionId
-            onInitComplete: () => releaseGate(),
+            acquireDispatchInitGate,
+            waitForPreviousTurn: async () => {
+              await Promise.allSettled(previousTurnTasks);
+            },
           });
         } catch (err) {
           // ✅ Only log error, don't re-throw to prevent gateway restart
           logger.error(`XY gateway: error handling message from ${serverId}: ${String(err)}`);
         } finally {
-          // 🔑 确保门控始终被释放。handleXYMessage 内部会 catch 所有异常
-          // 且某些提前返回路径（clearContext、tasks/cancel 等）不会调用
-          // onInitComplete，因此必须在 finally 中兜底释放。
-          releaseGate();
-          // Remove from active messages when done
           activeMessages.delete(messageKey);
         }
+      };
+
+      const runTask = (): Promise<void> => {
+        const pending = task();
+        let tasksForSession = activeTurnTasks.get(sessionId);
+        if (!tasksForSession) {
+          tasksForSession = new Set();
+          activeTurnTasks.set(sessionId, tasksForSession);
+        }
+        tasksForSession.add(pending);
+        void pending.finally(() => {
+          tasksForSession.delete(pending);
+          if (tasksForSession.size === 0) {
+            activeTurnTasks.delete(sessionId);
+          }
+        }).catch(() => {});
+        return pending;
       };
 
       // Steer detection: when queue mode is "steer" and the session has an active
       // run, process the message concurrently (skip the per-session serial queue).
       // This prevents the steer message from waiting behind the first message's
-      // completion. The actual steer injection is handled by OpenClaw's auto-reply
-      // pipeline (agent-runner.ts), not by the channel itself.
+      // completion. Direct injection is handled by bot.ts / steer-service.ts;
+      // if the active run rejects the message, bot waits for these tracked tasks
+      // to settle before starting a replacement dispatch.
       const messageMethod = message.method;
       if (messageMethod === "clearContext" || messageMethod === "clear_context") {
-        void enqueue(sessionId, task).catch((err) => {
+        void enqueue(sessionId, runTask).catch((err) => {
           logger.error(`XY gateway: queue processing failed: ${String(err)}`);
           activeMessages.delete(messageKey);
         });
@@ -162,7 +182,7 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
         // tasks/cancel 仅发送一个简单的响应，不涉及复杂的任务状态变更，
         // 因此无需排队等待，直接并发执行以确保客户端及时收到 canceled 响应。
         logger.log(`[MONITOR] CANCEL: executing concurrently, messageKey=${messageKey}`);
-        void task().catch((err) => {
+        void runTask().catch((err) => {
           logger.error(`XY gateway: concurrent cancel task failed for ${messageKey}: ${String(err)}`);
           activeMessages.delete(messageKey);
         });
@@ -174,18 +194,18 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
 
           if (steerMode && hasActiveRun) {
             logger.log(`[MONITOR] STEER MODE: executing concurrently, sessionId=${parsed.sessionId}, messageKey=${messageKey}`);
-            void task().catch((err) => {
+            void runTask().catch((err) => {
               logger.error(`XY gateway: concurrent steer task failed for ${messageKey}: ${String(err)}`);
               activeMessages.delete(messageKey);
             });
           } else {
-            void enqueue(sessionId, task).catch((err) => {
+            void enqueue(sessionId, runTask).catch((err) => {
               logger.error(`XY gateway: queue processing failed: ${String(err)}`);
               activeMessages.delete(messageKey);
             });
           }
         } catch {
-          void enqueue(sessionId, task).catch((err) => {
+          void enqueue(sessionId, runTask).catch((err) => {
             logger.error(`XY gateway: queue processing failed: ${String(err)}`);
             activeMessages.delete(messageKey);
           });
@@ -302,6 +322,7 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
 
       loggedServers.clear();
       activeMessages.clear();
+      activeTurnTasks.clear();
       logger.log(`[MONITOR-HANDLER] Cleanup complete, cleared active messages and sessions`);
 
       // 🔍 Diagnose after cleanup
