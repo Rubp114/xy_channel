@@ -10,13 +10,24 @@ const LOG_DIR = "/tmp/openclaw";
 const LOG_PREFIX = "xiaoyi-channel";
 // 日志最长只保留最近 7 天
 const MAX_AGE_DAYS = 7;
-// 单个日志文件最大 100MB，超限即切分（备份文件同样按 7 天清理）
-const MAX_FILE_BYTES = 100 * 1024 * 1024;
+// 单个日志文件最大 10MB，超限即切分出带时间戳的备份文件
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+// 全部日志文件总量上限 100MB：超过后按 mtime 从最旧的文件开始删
+// （正在写入的当天文件不删；Linux 下 unlink 一个打开中的文件会让日志静默丢失）
+const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
 
 // ── UTC+8 helpers ──
+function formatDateUTC8(d: Date): string {
+  return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
+}
+
 function getTodayDateStr(): string {
-  const utc8 = new Date(Date.now() + 8 * 60 * 60 * 1000);
-  return `${utc8.getUTCFullYear()}${String(utc8.getUTCMonth() + 1).padStart(2, "0")}${String(utc8.getUTCDate()).padStart(2, "0")}`;
+  return formatDateUTC8(new Date(Date.now() + 8 * 60 * 60 * 1000));
+}
+
+// 保留窗口起点（UTC+8）：文件名日期早于此日期的删除，即保留今天 + 之前 MAX_AGE_DAYS-1 天
+function getCutoffDateStr(): string {
+  return formatDateUTC8(new Date(Date.now() + 8 * 60 * 60 * 1000 - (MAX_AGE_DAYS - 1) * 24 * 60 * 60 * 1000));
 }
 
 function formatTimestampUTC8(): string {
@@ -40,40 +51,77 @@ try {
 } catch {}
 
 // ── Cleanup expired logs (older than MAX_AGE_DAYS) ──
+// 按文件名里的日期判断（xiaoyi-channel-YYYYMMDD...，UTC+8，与生成时一致）：
+// 日期早于 getCutoffDateStr() 的删除。文件名解析不出日期的文件不动它。
 function cleanupOldLogs(): void {
   try {
     const files = readdirSync(LOG_DIR);
-    const cutoff = Date.now() - MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
+    const cutoffStr = getCutoffDateStr();
+    const dateRe = new RegExp(`^${LOG_PREFIX}-(\\d{8})`);
     for (const f of files) {
+      if (!f.startsWith(LOG_PREFIX) || !f.endsWith(".log")) continue;
+      const m = dateRe.exec(f);
+      if (!m) continue;
+      if (m[1] < cutoffStr) {
+        try {
+          unlinkSync(join(LOG_DIR, f));
+        } catch {}
+      }
+    }
+  } catch {}
+  enforceTotalCap();
+}
+
+// ── Enforce total size cap ──
+// 所有 xiaoyi-channel-*.log 加起来超过 MAX_TOTAL_BYTES 时，按 mtime 从最旧的
+// 文件开始删，直到回到上限以内。正在写入的当天文件永不删除（否则会静默丢日志）。
+function enforceTotalCap(): void {
+  try {
+    const activePath = getLogFilePath(currentDate);
+    const files: { fp: string; size: number; mtimeMs: number }[] = [];
+    for (const f of readdirSync(LOG_DIR)) {
       if (!f.startsWith(LOG_PREFIX) || !f.endsWith(".log")) continue;
       const fp = join(LOG_DIR, f);
       try {
-        if (statSync(fp).mtimeMs < cutoff) unlinkSync(fp);
+        const st = statSync(fp);
+        files.push({ fp, size: st.size, mtimeMs: st.mtimeMs });
+      } catch {}
+    }
+    let total = files.reduce((sum, f) => sum + f.size, 0);
+    if (total <= MAX_TOTAL_BYTES) return;
+    files.sort((a, b) => a.mtimeMs - b.mtimeMs);
+    for (const f of files) {
+      if (total <= MAX_TOTAL_BYTES) break;
+      if (f.fp === activePath) continue;
+      try {
+        unlinkSync(f.fp);
+        total -= f.size;
       } catch {}
     }
   } catch {}
 }
 
-// Run cleanup on module load
+// ── File destination with daily rotation ──
+let currentDate = getTodayDateStr();
+const dest = pino.destination({ dest: getLogFilePath(currentDate), sync: false, mkdir: true });
+
+// Run cleanup on module load（放在 currentDate 声明之后，enforceTotalCap 依赖它）
 cleanupOldLogs();
 
 // Schedule periodic cleanup every 6 hours
 const cleanupTimer = setInterval(cleanupOldLogs, 6 * 60 * 60 * 1000);
 cleanupTimer.unref?.();
 
-// ── File destination with daily rotation ──
-let currentDate = getTodayDateStr();
-const dest = pino.destination({ dest: getLogFilePath(currentDate), sync: false, mkdir: true });
-
-// ── Current file size tracking (for 100MB cap) ──
+// ── Current file size tracking (for MAX_FILE_BYTES cap) ──
 // 进程启动时从现有文件初始化，随后按写入行字节数累加，避免每次写日志都 statSync。
 let currentFileBytes = 0;
 try {
   currentFileBytes = statSync(getLogFilePath(currentDate)).size;
 } catch {}
 
-// 当前文件超过 100MB：重命名为带时间戳的备份文件后重开新文件。
-// 备份文件名仍以 xiaoyi-channel 开头、.log 结尾，随 cleanupOldLogs 按 7 天统一清理。
+// 当前文件超过 MAX_FILE_BYTES：重命名为带时间戳的备份文件后重开新文件。
+// 备份文件名仍以 xiaoyi-channel 开头、.log 结尾，随 cleanupOldLogs 按 7 天 /
+// MAX_TOTAL_BYTES 总量上限统一清理。
 function rotateForSize(): void {
   try {
     const currentPath = getLogFilePath(currentDate);
@@ -85,6 +133,8 @@ function rotateForSize(): void {
     dest.reopen(currentPath);
   } catch {}
   currentFileBytes = 0;
+  // 切分出备份文件后总量可能超限，立刻按总量上限回收最旧文件
+  enforceTotalCap();
 }
 
 // ── Rotation check ──
