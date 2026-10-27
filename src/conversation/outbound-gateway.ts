@@ -89,20 +89,15 @@ export async function sendWsFrame(params: SendWsFrameParams): Promise<void> {
       taskId,
       msgDetail: JSON.stringify({ ...frame, hostname: os.hostname() }),
     };
-    // A2A 出站日志只打印终末帧（lastChunk=true 或 final=true）：信封摘要 +
-    // msgDetail 全量 + 内嵌 command 单独打印。流式中间帧（partial 文本、
-    // reasoning 流）不打印，避免高帧率刷屏。
-    // （内容字段已在组帧时脱敏，日志不会额外泄露敏感信息）
-    const result = frame?.result as Record<string, any> | undefined;
-    if (result?.lastChunk === true || result?.final === true) {
-      log.log(
-        `[A2A-OUT] msgType=${outboundMessage.msgType}, agentId=${outboundMessage.agentId}, sessionId=${sessionId}, taskId=${taskId}, size=${outboundMessage.msgDetail.length}`,
-      );
-      log.log(`[A2A-OUT] msgDetail=${outboundMessage.msgDetail}`);
-      const commands = extractCommands(frame);
-      if (commands.length > 0) {
-        log.log(`[A2A-OUT] commands=${JSON.stringify(commands)}`);
-      }
+    // 完整出站 A2A 日志：每一帧都打印信封摘要 + msgDetail 全量 + 内嵌 command
+    // 单独打印（内容字段已在组帧时脱敏，日志不会额外泄露敏感信息）
+    log.log(
+      `[A2A-OUT] msgType=${outboundMessage.msgType}, agentId=${outboundMessage.agentId}, sessionId=${sessionId}, taskId=${taskId}, size=${outboundMessage.msgDetail.length}`,
+    );
+    log.log(`[A2A-OUT] msgDetail=${outboundMessage.msgDetail}`);
+    const commands = extractCommands(frame);
+    if (commands.length > 0) {
+      log.log(`[A2A-OUT] commands=${JSON.stringify(commands)}`);
     }
     await wsManager.sendMessage(sessionId, outboundMessage);
   }

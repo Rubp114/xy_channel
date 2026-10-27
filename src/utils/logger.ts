@@ -8,6 +8,8 @@ import { join } from "path";
 // ── Configuration ──
 const LOG_DIR = "/tmp/openclaw";
 const LOG_PREFIX = "xiaoyi-channel";
+// A2A-OUT 出站帧日志单独成文件（全量 msgDetail 量大，与主日志隔离）
+const A2A_LOG_PREFIX = "A2A-OUT";
 const MAX_AGE_DAYS = 30;
 
 // ── UTC+8 helpers ──
@@ -31,6 +33,10 @@ function getLogFilePath(dateStr?: string): string {
   return join(LOG_DIR, `${LOG_PREFIX}-${dateStr ?? getTodayDateStr()}.log`);
 }
 
+function getA2ALogFilePath(dateStr?: string): string {
+  return join(LOG_DIR, `${A2A_LOG_PREFIX}-${dateStr ?? getTodayDateStr()}.log`);
+}
+
 // ── Ensure log directory ──
 try {
   mkdirSync(LOG_DIR, { recursive: true });
@@ -42,7 +48,7 @@ function cleanupOldLogs(): void {
     const files = readdirSync(LOG_DIR);
     const cutoff = Date.now() - MAX_AGE_DAYS * 24 * 60 * 60 * 1000;
     for (const f of files) {
-      if (!f.startsWith(LOG_PREFIX) || !f.endsWith(".log")) continue;
+      if (!(f.startsWith(LOG_PREFIX) || f.startsWith(A2A_LOG_PREFIX)) || !f.endsWith(".log")) continue;
       const fp = join(LOG_DIR, f);
       try {
         if (statSync(fp).mtimeMs < cutoff) unlinkSync(fp);
@@ -61,6 +67,7 @@ cleanupTimer.unref?.();
 // ── File destination with daily rotation ──
 let currentDate = getTodayDateStr();
 const dest = pino.destination({ dest: getLogFilePath(currentDate), sync: false, mkdir: true });
+const a2aDest = pino.destination({ dest: getA2ALogFilePath(currentDate), sync: false, mkdir: true });
 
 // ── Rotation check ──
 function checkRotation(): void {
@@ -68,6 +75,7 @@ function checkRotation(): void {
   if (today !== currentDate) {
     currentDate = today;
     dest.reopen(getLogFilePath(today));
+    a2aDest.reopen(getA2ALogFilePath(today));
     cleanupOldLogs();
   }
 }
@@ -104,7 +112,9 @@ function writeLog(level: string, message: string, args: any[], explicitSid?: str
   const taskId = explicitTid !== undefined ? explicitTid : getSessionInfo().taskId;
   const timestamp = formatTimestampUTC8();
   const msg = args.length ? formatMessage(message, args) : message;
-  dest.write(`|${level}|${timestamp}|${sessionId}|${taskId}|${msg}\n`);
+  // [A2A-OUT] 标签的日志单独路由到 A2A-OUT-YYYYMMDD.log（不进主日志）
+  const target = msg.startsWith("[A2A-OUT]") ? a2aDest : dest;
+  target.write(`|${level}|${timestamp}|${sessionId}|${taskId}|${msg}\n`);
 }
 
 export interface ScopedLogger {

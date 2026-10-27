@@ -163,9 +163,8 @@ export async function handleSelfEvolutionStateGetEvent(
       msgDetail: JSON.stringify({ ...jsonRpcResponse, hostname: os.hostname() }),
     };
 
-    logger.log(`[A2A_COMMAND] Sending A2A command, taskId: ${taskId}`);
     await wsManager.sendMessage(sessionId, outboundMessage);
-    logger.log(`[SELF_EVOLUTION_GET] command sent successfully`);
+    logger.log(`[SELF_EVOLUTION_GET] command sent successfully, taskId: ${taskId}`);
   } catch (err) {
     logger.error("[SELF_EVOLUTION_GET] failed to handle event:", err);
   }
