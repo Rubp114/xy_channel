@@ -15,6 +15,8 @@ const MAX_FILE_BYTES = 10 * 1024 * 1024;
 // 全部日志文件总量上限 100MB：超过后按 mtime 从最旧的文件开始删
 // （正在写入的当天文件不删；Linux 下 unlink 一个打开中的文件会让日志静默丢失）
 const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
+// A2A-OUT 出站帧日志单独成文件（全量 msgDetail 量大，与主日志隔离）
+const A2A_LOG_PREFIX = "A2A-OUT";
 
 // ── UTC+8 helpers ──
 function formatDateUTC8(d: Date): string {
@@ -45,6 +47,10 @@ function getLogFilePath(dateStr?: string): string {
   return join(LOG_DIR, `${LOG_PREFIX}-${dateStr ?? getTodayDateStr()}.log`);
 }
 
+function getA2ALogFilePath(dateStr?: string): string {
+  return join(LOG_DIR, `${A2A_LOG_PREFIX}-${dateStr ?? getTodayDateStr()}.log`);
+}
+
 // ── Ensure log directory ──
 try {
   mkdirSync(LOG_DIR, { recursive: true });
@@ -57,9 +63,9 @@ function cleanupOldLogs(): void {
   try {
     const files = readdirSync(LOG_DIR);
     const cutoffStr = getCutoffDateStr();
-    const dateRe = new RegExp(`^${LOG_PREFIX}-(\\d{8})`);
+    const dateRe = new RegExp(`^(?:${LOG_PREFIX}|${A2A_LOG_PREFIX})-(\\d{8})`);
     for (const f of files) {
-      if (!f.startsWith(LOG_PREFIX) || !f.endsWith(".log")) continue;
+      if (!(f.startsWith(LOG_PREFIX) || f.startsWith(A2A_LOG_PREFIX)) || !f.endsWith(".log")) continue;
       const m = dateRe.exec(f);
       if (!m) continue;
       if (m[1] < cutoffStr) {
@@ -80,7 +86,7 @@ function enforceTotalCap(): void {
     const activePath = getLogFilePath(currentDate);
     const files: { fp: string; size: number; mtimeMs: number }[] = [];
     for (const f of readdirSync(LOG_DIR)) {
-      if (!f.startsWith(LOG_PREFIX) || !f.endsWith(".log")) continue;
+      if (!(f.startsWith(LOG_PREFIX) || f.startsWith(A2A_LOG_PREFIX)) || !f.endsWith(".log")) continue;
       const fp = join(LOG_DIR, f);
       try {
         const st = statSync(fp);
@@ -104,6 +110,7 @@ function enforceTotalCap(): void {
 // ── File destination with daily rotation ──
 let currentDate = getTodayDateStr();
 const dest = pino.destination({ dest: getLogFilePath(currentDate), sync: false, mkdir: true });
+const a2aDest = pino.destination({ dest: getA2ALogFilePath(currentDate), sync: false, mkdir: true });
 
 // Run cleanup on module load（放在 currentDate 声明之后，enforceTotalCap 依赖它）
 cleanupOldLogs();
@@ -144,6 +151,7 @@ function checkRotation(): void {
     currentDate = today;
     dest.reopen(getLogFilePath(today));
     currentFileBytes = 0;
+    a2aDest.reopen(getA2ALogFilePath(today));
     cleanupOldLogs();
     return;
   }
@@ -185,8 +193,12 @@ function writeLog(level: string, message: string, args: any[], explicitSid?: str
   const timestamp = formatTimestampUTC8();
   const msg = args.length ? formatMessage(message, args) : message;
   const line = `|${level}|${timestamp}|${sessionId}|${taskId}|${msg}\n`;
-  currentFileBytes += Buffer.byteLength(line, "utf8");
-  dest.write(line);
+  // [A2A-OUT] 标签的日志单独路由到 A2A-OUT-YYYYMMDD.log（不进主日志）
+  const target = msg.startsWith("[A2A-OUT]") ? a2aDest : dest;
+  if (target === dest) {
+    currentFileBytes += Buffer.byteLength(line, "utf8");
+  }
+  target.write(line);
 }
 
 export interface ScopedLogger {
