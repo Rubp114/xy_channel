@@ -9,6 +9,8 @@ import {
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { getXYRuntime } from "../runtime.js";
 import { createXYReplyDispatcher } from "./reply-dispatcher.js";
+import { createLegacyReplyDispatcher } from "../legacy/reply-dispatcher.js";
+import { sendStatusUpdate as legacySendStatusUpdate } from "../legacy/formatter.js";
 import { parseA2AMessage, extractTextFromParts, extractFileParts, extractPushId, extractDeviceType, extractAppVer, extractSdkApiVersion, extractModelName, extractTriggerData, extractRunCrossTaskContext, isClearContextMessage, isTasksCancelMessage } from "../parser.js";
 import { downloadFilesFromParts } from "../file-download.js";
 import { resolveXYConfig } from "../config.js";
@@ -25,7 +27,7 @@ import { selfEvolutionManager } from "../utils/self-evolution-manager.js";
 import { saveRuntimeInfo } from "../utils/runtime-manager.js";
 import { toolCallNudgeManager } from "../utils/tool-call-nudge-manager.js";
 import { tryDirectSteer } from "../conversation/steer-service.js";
-import { markAppVersion } from "../utils/app-version.js";
+import { markAppVersion, isLegacyAppVersion } from "../utils/app-version.js";
 import {
   registerTask,
   completeTask,
@@ -263,10 +265,24 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     const config = resolveXYConfig(cfg);
     cacheXYConfig(config);
 
-    // 对话轮开始：下发 DisplayTaskCardData 起始卡（index=1，任务正在处理中）。
+    // 低版本链路（app_ver < 11.7.8.357）：按合并前 0730 的下发逻辑 ——
+    // 直发初始 status-update，不发 DisplayTaskCardData 起始卡。
+    // 新版本链路：下发 DisplayTaskCardData 起始卡（index=1，任务正在处理中）。
     // 走会话出站队列而非直发，排在上一 turn 可能在途的终态帧之后（steer 场景）；
     // 配对卡的 final 帧由 reply-dispatcher / conversation-manager 在对话轮结束时下发。
-    {
+    if (isLegacyAppVersion(parsed.taskId)) {
+      log.log(`[BOT] Sending initial status update (legacy)`);
+      void legacySendStatusUpdate({
+        config,
+        sessionId: parsed.sessionId,
+        taskId: parsed.taskId,
+        messageId: parsed.messageId,
+        text: "任务正在处理中，请稍候~",
+        state: "working",
+      }).catch((err) => {
+        log.error(`Failed to send initial status update (legacy):`, err);
+      });
+    } else {
       const startSession = getOrCreateSession(parsed.sessionId);
       const startTaskId = parsed.taskId;
       const startMessageId = parsed.messageId;
@@ -550,7 +566,11 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       log.log(`[BOT] Cleanup completed`);
     };
 
-    const { dispatcher, replyOptions, markDispatchIdle, startStatusInterval } = createXYReplyDispatcher({
+    // 低版本链路：使用合并前 0730 的 dispatcher（src/legacy/，完全独立实现）
+    const createDispatcher = isLegacyAppVersion(parsed.taskId)
+      ? createLegacyReplyDispatcher
+      : createXYReplyDispatcher;
+    const { dispatcher, replyOptions, markDispatchIdle, startStatusInterval } = createDispatcher({
       cfg,
       runtime,
       sessionId: parsed.sessionId,
@@ -609,11 +629,20 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
           const transition = markParentSettled(parsed.sessionId, pendingWait.taskId);
           if (transition?.shouldFinalize) {
             // All completions arrived before parent settled → finalize now
-            const { deliverSubagentFinalResult } = await import("../conversation/conversation-manager.js");
-            await deliverSubagentFinalResult({
-              state: transition.state,
-              reason: "all-subagent-results-delivered-before-parent-settled",
-            });
+            // 低版本链路走 legacy 交付（与合并前 0730 一致），新版本走主链路
+            if (isLegacyAppVersion(transition.state.taskId)) {
+              const { deliverLegacySubagentFinalResult } = await import("../legacy/keepalive.js");
+              await deliverLegacySubagentFinalResult({
+                state: transition.state,
+                reason: "all-subagent-results-delivered-before-parent-settled",
+              });
+            } else {
+              const { deliverSubagentFinalResult } = await import("../conversation/conversation-manager.js");
+              await deliverSubagentFinalResult({
+                state: transition.state,
+                reason: "all-subagent-results-delivered-before-parent-settled",
+              });
+            }
             log.log(`[BOT] Subagent wait complete on parent settled; final response delivered`);
           } else {
             log.log(`[BOT] Subagent wait active, preserving session context for completion`);

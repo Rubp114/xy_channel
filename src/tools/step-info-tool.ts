@@ -55,6 +55,7 @@ import {
   getCronToolRunInfo,
 } from "./session-manager.js";
 import { logger } from "../utils/logger.js";
+import { isLegacyAppVersion } from "../utils/app-version.js";
 import type { XYChannelConfig } from "../types.js";
 
 const LOG_TAG = "[STEP-INFO]";
@@ -345,6 +346,10 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
       const sendCtx = resolveSendContext(event, ctx);
       if (!sendCtx) return;
 
+      // 低版本链路（app_ver < 11.7.8.357）整体跳过：不下发状态卡/技能卡/
+      // 步骤卡，也不做文本分段边界（旧客户端无此能力，按合并前逻辑下发）
+      if (isLegacyAppVersion(sendCtx.taskId)) return;
+
       // 1. 技能任务卡片（cd 进技能目录 / 读 SKILL.md）
       const skillAction = detectSkillAction(event);
       if (skillAction) {
@@ -437,6 +442,10 @@ export function registerStepInfoHook(api: OpenClawPluginApi): void {
         logger.log(`${LOG_TAG} skip segment boundary: no send context, tool=${event.toolName}`);
         return;
       }
+
+      // 低版本链路（app_ver < 11.7.8.357）不做分段边界：旧客户端无
+      // streamingTextId 分段能力，正文按合并前的单段流式下发
+      if (isLegacyAppVersion(sendCtx.taskId)) return;
 
       // 工具返回点：文本分段边界（旧段 lastChunk=true 收尾 + 轮换 streamingTextId）
       await rotateTextSegmentAtToolBoundary({ ...sendCtx });
