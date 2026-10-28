@@ -25,6 +25,7 @@ import { selfEvolutionManager } from "../utils/self-evolution-manager.js";
 import { saveRuntimeInfo } from "../utils/runtime-manager.js";
 import { toolCallNudgeManager } from "../utils/tool-call-nudge-manager.js";
 import { tryDirectSteer } from "../conversation/steer-service.js";
+import { markAppVersion } from "../utils/app-version.js";
 import {
   registerTask,
   completeTask,
@@ -244,6 +245,8 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     if (appVer) {
       log.log(`[BOT] Extracted app_ver: ${appVer}`);
     }
+    // 低版本判定（低于 11.7.8.357）：本 turn 所有出站帧 isNew 置 false
+    markAppVersion(parsed.taskId, appVer);
     const sdkApiVersion = extractSdkApiVersion(parsed.parts);
     if (sdkApiVersion) {
       log.log(`[BOT] Extracted sdk_api_version: ${sdkApiVersion}`);

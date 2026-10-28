@@ -6,6 +6,7 @@ import { getOrCreateStreamingTextId, peekStreamingTextId, releaseStreamingTextId
 import { isReasoningFinished as readReasoningFinished, releaseReasoningState } from "./utils/reasoning-state.js";
 import { releaseStatusCardSeq, getCurrentStatusCardSeq, nextStatusCardSeq } from "./utils/status-card-seq.js";
 import { releaseThinkIndex } from "./utils/think-index.js";
+import { isLegacyAppVersion, releaseAppVersion } from "./utils/app-version.js";
 import { logger } from "./utils/logger.js";
 import { redactSensitiveText, containsSensitiveInfo } from "./sensitive-redactor.js";
 import { rewriteOutboundApprovalText } from "./approval-bridge.js";
@@ -118,7 +119,7 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
     taskUniqId: taskId,
     taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
-    isNew: true,
+    isNew: !isLegacyAppVersion(taskId),
     append,
     lastChunk: params.lastChunk ?? final,
     streamingTextId: getOrCreateStreamingTextId(taskId),
@@ -180,6 +181,7 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
     releaseReasoningState(taskId);
     releaseStatusCardSeq(taskId);
     releaseThinkIndex(taskId);
+    releaseAppVersion(taskId);
   }
   if (shouldLog) {
     log.log(`[A2A_RESPONSE] Message sent successfully`);
@@ -223,7 +225,7 @@ export async function sendReasoningTextUpdate(params: SendReasoningTextUpdatePar
     taskUniqId: taskId,
     taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
-    isNew: true,
+    isNew: !isLegacyAppVersion(taskId),
     append,
     lastChunk: params.lastChunk ?? false,
     final: false,
@@ -304,7 +306,7 @@ export async function sendStatusUpdate(params: SendStatusUpdateParams): Promise<
   const statusUpdate: A2ATaskStatusUpdateEvent = {
     taskId,
     kind: "status-update",
-    isNew: true,
+    isNew: !isLegacyAppVersion(taskId),
     final: false, // Status updates should not end the stream
     ...(currentStreamingTextId ? { streamingTextId: currentStreamingTextId } : {}),
     status: {
@@ -431,7 +433,7 @@ export async function sendCommand(params: SendCommandParams): Promise<void> {
     taskUniqId: taskId,
     taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
-    isNew: true,
+    isNew: !isLegacyAppVersion(taskId),
     append: false,
     lastChunk: params.lastChunk ?? false,
     final: params.final ?? false,
@@ -637,7 +639,7 @@ export async function sendCard(params: SendCardParams): Promise<void> {
     taskUniqId: taskId,
     taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
-    isNew: true,
+    isNew: !isLegacyAppVersion(taskId),
     append: false,
     lastChunk: params.lastChunk ?? false,
     final: params.final ?? false,
@@ -749,7 +751,7 @@ export async function sendReference(params: SendReferenceParams): Promise<void> 
     taskUniqId: taskId,
     taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
-    isNew: true,
+    isNew: !isLegacyAppVersion(taskId),
     append: false,
     lastChunk: params.lastChunk ?? false,
     final: params.final ?? false,
@@ -894,7 +896,7 @@ export async function sendTriggerResponse(params: SendTriggerResponseParams): Pr
       taskUniqId: taskId,
       taskUniqIndexId: getCurrentStatusCardSeq(taskId),
       kind: "artifact-update",
-      isNew: true,
+      isNew: !isLegacyAppVersion(taskId),
       append: false,
       lastChunk: false,
       final: true,
@@ -918,5 +920,6 @@ export async function sendTriggerResponse(params: SendTriggerResponseParams): Pr
   releaseReasoningState(taskId);
   releaseStatusCardSeq(taskId);
   releaseThinkIndex(taskId);
+  releaseAppVersion(taskId);
   log.log(`[TRIGGER_RESPONSE] Trigger response sent successfully`);
 }

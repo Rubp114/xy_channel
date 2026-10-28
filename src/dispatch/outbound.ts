@@ -15,6 +15,7 @@ import { savePushData } from "../utils/pushdata-manager.js";
 import { isReasoningFinished as readReasoningFinished } from "../utils/reasoning-state.js";
 import { getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
 import { getOrCreateStreamingTextId } from "../utils/streaming-text-id.js";
+import { isLegacyAppVersion } from "../utils/app-version.js";
 import { logger } from "../utils/logger.js";
 
 // Special marker for default push delivery when no target is specified
@@ -307,7 +308,7 @@ export const xyOutbound: ChannelOutboundAdapter = {
       id: taskId,
       result: {
         kind: "artifact-update",
-        isNew: true,
+        isNew: !isLegacyAppVersion(taskId),
         append: true,
         lastChunk: false,
         final: false,

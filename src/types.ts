@@ -146,7 +146,7 @@ export interface A2ATaskArtifactUpdateEvent {
    */
   taskUniqIndexId: number;
   kind: "artifact-update";
-  /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
+  /** A2A 链路下发内容标识（与 kind 同级）。App 版本低于 11.7.8.357 时置 false。 */
   isNew: boolean;
   append: boolean;
   /**
@@ -195,7 +195,7 @@ export interface A2ACommand {
 export interface A2ATaskStatusUpdateEvent {
   taskId: string;
   kind: "status-update";
-  /** A2A 链路下发内容标识，值恒为 true（与 kind 同级）。 */
+  /** A2A 链路下发内容标识（与 kind 同级）。App 版本低于 11.7.8.357 时置 false。 */
   isNew: boolean;
   final: boolean;
   /** 本轮 turn 当前文本流的 streamingTextId（与 reasoning/正文帧同源同值）。 */
