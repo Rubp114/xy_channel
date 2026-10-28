@@ -7,7 +7,7 @@ import { createXYReplyDispatcher } from "./reply-dispatcher.js";
 import { parseA2AMessage, extractTextFromParts, extractFileParts, extractPushId, extractDeviceType, extractAppVer, extractSdkApiVersion, extractModelName, extractTriggerData, extractRunCrossTaskContext, isClearContextMessage, isTasksCancelMessage } from "../parser.js";
 import { downloadFilesFromParts } from "../file-download.js";
 import { resolveXYConfig } from "../config.js";
-import { sendStatusUpdate, sendClearContextResponse, sendTasksCancelResponse, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
+import { sendClearContextResponse, sendTasksCancelResponse, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
 import {
   appendSelfEvolutionKeywordNudge,
   shouldNudgeForSelfEvolutionKeyword,
@@ -323,19 +323,6 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         log.error(`[BOT] Failed to patch session model override:`, patchErr);
       }
     }
-
-    // 🔑 发送初始状态更新
-    log.log(`[BOT] Sending initial status update`);
-    void sendStatusUpdate({
-      config,
-      sessionId: parsed.sessionId,
-      taskId: parsed.taskId,
-      messageId: parsed.messageId,
-      text: "思考中",
-      state: "working",
-    }).catch((err) => {
-      log.error(`Failed to send initial status update:`, err);
-    });
 
     // Extract text and files from parts
     const text = extractTextFromParts(parsed.parts);
