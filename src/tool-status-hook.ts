@@ -14,6 +14,7 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { sendExecuteStatusCard } from "./formatter.js";
 import { TOOL_STATUS_CARD_META } from "./tools/step-info-tool.js";
+import { isLegacyAppVersion } from "./utils/app-version.js";
 import { resolveXYConfig } from "./config.js";
 import {
   resolveBySessionKey,
@@ -87,6 +88,10 @@ export function registerToolStatusHook(api: OpenClawPluginApi): void {
 
       const taskId = getCurrentTaskId(binding.sessionId) ?? binding.taskId;
       const messageId = getCurrentMessageId(binding.sessionId) ?? binding.messageId;
+
+      // 低版本链路（app_ver < 11.7.8.357）不下发状态卡：旧客户端无此能力，
+      // 工具状态由 legacy dispatcher 的 onToolStart 状态帧承担（与合并前一致）
+      if (isLegacyAppVersion(taskId)) return;
 
       // 仅触发表内工具下发执行状态卡；表外工具不触发
       const meta = TOOL_STATUS_CARD_META[toolName];
