@@ -1,7 +1,7 @@
 // Reply dispatcher - completely following feishu/reply-dispatcher.ts pattern
 import type { ClawdbotConfig, RuntimeEnv, ReplyPayload } from "openclaw/plugin-sdk";
 import { getXYRuntime } from "../runtime.js";
-import { sendA2AResponse, sendStatusUpdate, sendReasoningTextUpdate, sendCommand } from "../formatter.js";
+import { sendA2AResponse, sendStatusUpdate, sendReasoningTextUpdate, sendCommand, sendDisplayTaskCardData, sendExecuteStatusCard } from "../formatter.js";
 import { resolveXYConfig } from "../config.js";
 import type { A2ACommand, RunCrossTaskContext, XYChannelConfig } from "../types.js";
 import { clearRunCrossTaskSentFiles, getCurrentSessionContext } from "../tools/session-manager.js";
@@ -23,6 +23,9 @@ import {
   deliverSubagentFinalResult,
 } from "../conversation/conversation-manager.js";
 import { StreamAssembler } from "../conversation/stream-assembler.js";
+import { markReasoningFinished, markReasoningStreaming } from "../utils/reasoning-state.js";
+import { getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
+import { markLastChunkBlock, getAccumulatedThinkIndex } from "../utils/think-index.js";
 
 // ⚙️ 前缀是 openclaw 系统消息稳定标记（infra/system-message.ts SYSTEM_MARK）。
 // ACP 绑定会话 turn 结束会以 kind=final 尾随投递系统诊断通知（如
@@ -234,6 +237,9 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
 
   let hasSentResponse = false;
   let finalSent = false;
+  // 当前思考块的最新全量快照（onReasoningStream 的 append:false 语义即全量），
+  // 供 onReasoningEnd 的思考块结束标记帧携带全量文本
+  let lastReasoningText = "";
 
   // ── 文本装配与出站时序由对话管理层拥有 ─────────────────────
   // assembler：model/injected 段拼接 + deliver 权威文本修正，生命周期随本
@@ -426,27 +432,9 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
           scopedLog().log(
             `[ON-IDLE] Waiting for subagent completions ${waitState.deliveredCompletions}/${waitState.expectedCompletions}, suppressing final:true`,
           );
-          // 会话不结束：转入 waiting-subagent，心跳由对话管理层继续维持
+          // 会话不结束：转入 waiting-subagent。一次性等待保活帧已下线；
+          // 等待期间的保活由 30s 保活卡心跳承担（waiting-subagent 在状态门内）。
           setSessionState(sessionId, "waiting-subagent");
-          // 🔑 保活帧必须使用最新 A2A 身份：steer 场景下旧 taskId 已被服务端
-          // 作废，用旧身份发帧无任何回应。读任务链末尾（新 dispatcher 场景下
-          // 与本 dispatcher 闭包 taskId 一致；旧 dispatcher 晚到触发时除外）。
-          const aliveTaskId = getActiveTaskId();
-          const aliveMessageId = getActiveMessageId();
-          outboundQueue.enqueue({
-            taskId: aliveTaskId,
-            label: "subagent-waiting-status",
-            send: () =>
-              sendStatusUpdate({
-                config,
-                sessionId,
-                taskId: aliveTaskId,
-                messageId: aliveMessageId,
-                text: "子任务正在处理中，请稍候~",
-                state: "working",
-              }),
-          });
-          // 心跳由对话管理层拥有，subagent 等待期间自动存活，无需附加到等待态
           return;
         }
         // If wait state exists and all subagents are already complete,
@@ -496,6 +484,11 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
             const terminalTaskId = getActiveTaskId();
             const terminalMessageId = getActiveMessageId();
 
+            // 🔑 进入收尾：先把会话状态置为 completing —— 心跳 tick 对该状态
+            // 直接跳过，避免终态帧（completed）发出后、队列 drain 窗口内又
+            // 插出一条携带同 streamingTextId 的 working 保活帧。
+            setSessionState(sessionId, "completing");
+
             // 🔑 权威文本合并：deliver(kind=final) 捕获的 canonical 文本
             // （openclaw 从最后一条 assistant 消息直接提取）非空时替换流式
             // 累计的末轮 —— message_end 的最终清洗文本不走 onPartialReply，
@@ -544,18 +537,18 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     sessionId,
                     taskId: terminalTaskId,
                     messageId: terminalMessageId,
-                    text: "任务处理已完成~",
+                    text: "已完成深度思考",
                     state: "completed",
                   }),
               });
 
-              // 🔑 最终帧携带权威全文本（append:false 整体替换）—— 流式期间
-              // 缺失的尾部在此补齐。空文本属异常路径，回退旧的空帧语义
-              // （append:true 仅标记流结束），避免把客户端已展示内容刷空。
+              // 🔑 正文文本完成帧（lastChunk=true, final=false）：权威全文本在此
+              // 补齐（原终帧携带全文本的语义前移到本帧），把 final=true 留给
+              // 最后的空载终帧 —— 满足「正文 lastChunk → 汇总卡 → final」时序。
               if (fullFinalText) {
                 outboundQueue.enqueue({
                   taskId: terminalTaskId,
-                  label: "terminal-final",
+                  label: "terminal-text-complete",
                   delayMs: terminalFrameDelayMs,
                   send: () =>
                     sendA2AResponse({
@@ -565,26 +558,70 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                       messageId: terminalMessageId,
                       text: fullFinalText,
                       append: false,
-                      final: true,
+                      final: false,
+                      lastChunk: true,
                     }),
                 });
-              } else {
+              }
+
+              // 🔑 汇总状态卡：thinkIndex 攒批（本 turn 内工具卡不逐张携带，
+              // 攒到这里统一下发）——携带除最后一轮正文外的前置轮文本块
+              // taskUniqIndexId（最后一轮正文的 id = 当前卡序号，过滤掉）。
+              // 排在 final 帧之前：终态帧发出后服务端可能关闭本 turn。
+              {
+                const currentSeq = getCurrentStatusCardSeq(terminalTaskId);
+                const summaryThinkIndex = getAccumulatedThinkIndex(terminalTaskId)
+                  .filter((id) => id !== String(currentSeq));
                 outboundQueue.enqueue({
                   taskId: terminalTaskId,
-                  label: "terminal-final-empty",
-                  delayMs: terminalFrameDelayMs,
+                  label: "terminal-summary-card",
                   send: () =>
-                    sendA2AResponse({
+                    sendExecuteStatusCard({
                       config,
                       sessionId,
                       taskId: terminalTaskId,
                       messageId: terminalMessageId,
-                      text: "",
-                      append: true,
-                      final: true,
+                      text: "任务处理已完成",
+                      thinkIndex: summaryThinkIndex,
                     }),
                 });
               }
+
+              // 对话轮结束：DisplayTaskCardData final 帧收尾（起始卡在 bot.ts
+              // 下发）。index 在 drain 时惰性读取 —— 排在汇总卡之后，落在
+              // 汇总卡的序号上完成配对收尾。
+              outboundQueue.enqueue({
+                taskId: terminalTaskId,
+                label: "task-card-final",
+                send: () =>
+                  sendDisplayTaskCardData({
+                    config,
+                    sessionId,
+                    taskId: terminalTaskId,
+                    messageId: terminalMessageId,
+                    index: getCurrentStatusCardSeq(terminalTaskId),
+                    stepName: "任务处理已完成",
+                    isFinal: true,
+                  }),
+              });
+
+              // 🔑 空载终帧（append:true, final:true）仅标记流结束 —— 权威全文本
+              // 已在上面的 terminal-text-complete 帧下发，本帧不再携带文本。
+              outboundQueue.enqueue({
+                taskId: terminalTaskId,
+                label: "terminal-final",
+                delayMs: terminalFrameDelayMs,
+                send: () =>
+                  sendA2AResponse({
+                    config,
+                    sessionId,
+                    taskId: terminalTaskId,
+                    messageId: terminalMessageId,
+                    text: "",
+                    append: true,
+                    final: true,
+                  }),
+              });
 
               await outboundQueue.whenIdle();
               finalSent = true;
@@ -603,6 +640,8 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
             scopedLog().log(`[ON-IDLE] Skipping final message: hasSentResponse=${hasSentResponse}, finalSent=${finalSent}`);
             const failureTaskId = getActiveTaskId();
             const failureMessageId = getActiveMessageId();
+            // 与正常路径同理：入队失败终态帧前置为 failed，关闭心跳保活窗口
+            setSessionState(sessionId, "failed");
             try {
               const runCrossTaskContext = getRunCrossTaskContext();
               if (runCrossTaskContext) {
@@ -632,8 +671,25 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     sessionId,
                     taskId: failureTaskId,
                     messageId: failureMessageId,
-                    text: "任务处理中断了~",
+                    text: "任务处理中断了",
                     state: "failed",
+                  }),
+              });
+
+              // 失败收尾：同样下发 DisplayTaskCardData final 帧关闭起始卡，
+              // 否则端侧卡片会一直停留在"任务正在处理中"
+              outboundQueue.enqueue({
+                taskId: failureTaskId,
+                label: "task-card-final-failure",
+                send: () =>
+                  sendDisplayTaskCardData({
+                    config,
+                    sessionId,
+                    taskId: failureTaskId,
+                    messageId: failureMessageId,
+                    index: getCurrentStatusCardSeq(failureTaskId),
+                    stepName: "任务处理已完成",
+                    isFinal: true,
                   }),
               });
 
@@ -646,7 +702,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                     sessionId,
                     taskId: failureTaskId,
                     messageId: failureMessageId,
-                    text: "任务执行异常，请重试~",
+                    text: "任务执行异常，请重试",
                     append: false,
                     final: true,
                     errorCode: 99921111,
@@ -685,72 +741,11 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
       suppressToolErrorWarnings: true,
       onModelSelected: prefixContext.onModelSelected,
 
-      onToolStart: async ({ name, phase }) => {
-        if (isOutputStale()) return;
-        scopedLog().log(`[TOOL-START] Tool: ${name}, phase: ${phase}`);
-
-        if (phase === "start") {
-          const toolName = name || "unknown";
-
-          // call_device_tool 由自身 execute() 内部发送具体子工具名的状态更新
-          // get_xxx_tool_schema 是给 LLM 查 schema 用的，无需向用户展示
-          if (toolName === "call_device_tool" || toolName.endsWith("_tool_schema") || toolName === "huawei_id_tool") {
-            scopedLog().log(`[TOOL-START] Skipping generic status for ${toolName}`);
-            return;
-          }
-
-          try {
-            const toolTaskId = getActiveTaskId();
-            outboundQueue.enqueue({
-              taskId: toolTaskId,
-              label: "tool-start-status",
-              send: () =>
-                sendStatusUpdate({
-                  config,
-                  sessionId,
-                  taskId: toolTaskId,
-                  messageId: getActiveMessageId(),
-                  text: `正在使用工具: ${toolName}...`,
-                  state: "working",
-                }),
-            });
-            scopedLog().log(`[TOOL-START] Sent status update for tool start: ${toolName}`);
-          } catch (err) {
-            scopedLog().error(`[TOOL-START] Failed to send tool start status:`, err);
-          }
-        }
-      },
-
       onToolResult: async (payload: ReplyPayload) => {
         if (isOutputStale()) return;
         const text = payload.text ?? "";
-        const hasMedia = Boolean(payload.mediaUrl || (payload.mediaUrls?.length ?? 0) > 0);
-
+        // 工具结果不再下发任何帧（结果卡已移除）；保留日志便于排查
         scopedLog().log(`[TOOL-RESULT] Tool result, text.length: ${text.length}`);
-
-        try {
-          if (text.length > 0 || hasMedia) {
-            const resultText = text.length > 0 ? text : "工具执行完成";
-            const toolTaskId = getActiveTaskId();
-
-            outboundQueue.enqueue({
-              taskId: toolTaskId,
-              label: "tool-result-status",
-              send: () =>
-                sendStatusUpdate({
-                  config,
-                  sessionId,
-                  taskId: toolTaskId,
-                  messageId: getActiveMessageId(),
-                  text: resultText,
-                  state: "working",
-                }),
-            });
-            scopedLog().log(`[TOOL-RESULT] Sent tool result as status update`);
-          }
-        } catch (err) {
-          scopedLog().error(`[TOOL-RESULT] Failed to send tool result status:`, err);
-        }
       },
 
       onReasoningStream: async (payload: ReplyPayload) => {
@@ -766,6 +761,12 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
         try {
           if (text.length > 0) {
             const reasoningTaskId = getActiveTaskId();
+            // 记录当前思考块最新全量快照（append:false 语义即全量），
+            // 供思考块结束标记帧携带
+            lastReasoningText = text;
+            // 新一轮 reasoning 流开始：复位 turn 级 isReasoningFinished
+            // （同一 turn 可能有多个 reasoning 块：思考→工具→再思考）。
+            markReasoningStreaming(reasoningTaskId);
             outboundQueue.enqueue({
               taskId: reasoningTaskId,
               label: "reasoning-stream",
@@ -782,6 +783,61 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
           }
         } catch (err) {
           scopedLog().error(`[REASONING-STREAM] Failed to send reasoning text:`, err);
+        }
+      },
+
+      onReasoningEnd: async () => {
+        // SDK thinking_end：标记本 turn reasoning 结束，并补发思考块结束标记帧
+        // （携带本思考块的全量文本、append=false 快照语义、isReasoningFinished=true
+        // + lastChunk=true；两个标记都显式 pin 而非 lazy 读状态表，防止帧在队
+        // 期间新一轮 reasoning 复位状态导致标记帧丢失语义），让端侧及时收起
+        // 思维链面板并落定该块的完整内容。
+        const endTaskId = getActiveTaskId();
+        markReasoningFinished(endTaskId);
+        // 攒入思考文本块的 taskUniqIndexId：统一在终态汇总卡（text=任务处理
+        // 已完成）携带，中间状态卡不携带。同步标记（而非等标记帧 drain），
+        // 保证不受出站队列时序影响。
+        markLastChunkBlock(endTaskId, getCurrentStatusCardSeq(endTaskId));
+        scopedLog().log(`[REASONING-END] Reasoning finished, taskId=${endTaskId}`);
+
+        try {
+          // 结束标记帧携带本思考块的全量文本（append=false 快照语义），
+          // 值在入队时捕获 —— 防止 drain 前新一轮 reasoning 更新了快照
+          const reasoningFullText = lastReasoningText;
+          outboundQueue.enqueue({
+            taskId: endTaskId,
+            label: "reasoning-end",
+            send: () =>
+              sendReasoningTextUpdate({
+                config,
+                sessionId,
+                taskId: endTaskId,
+                messageId: getActiveMessageId(),
+                text: reasoningFullText,
+                append: false,
+                isReasoningFinished: true,
+                lastChunk: true,
+              }),
+          });
+
+          // 思考块结束后紧跟一帧 status-update（"已完成深度思考"），
+          // 每个思考块结束时都发；正文完成后不再发（终态帧文案另见
+          // terminal-status）。state=working：turn 仍在进行。
+          outboundQueue.enqueue({
+            taskId: endTaskId,
+            label: "reasoning-end-status",
+            send: () =>
+              sendStatusUpdate({
+                config,
+                sessionId,
+                taskId: endTaskId,
+                messageId: getActiveMessageId(),
+                text: "已完成深度思考",
+                state: "working",
+              }),
+          });
+        } catch (err) {
+          scopedLog().error(`[REASONING-END] Failed to send reasoning-end marker:`, err);
         }
       },
 
@@ -806,10 +862,14 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
           if (isOutputStale()) return;
 
           // assembler 内部完成 startsWith 边界检测与跨调用锁存（含轮间换行）
-          const { fullText } = assembler.onStreamText(text);
+          assembler.onStreamText(text);
           const partialTaskId = getActiveTaskId();
           const partialMessageId = getActiveMessageId();
 
+          // 🔑 帧文本在 drain 时惰性读取装配器，而非入队时捕获快照：
+          // 帧在队期间若发生分段边界（工具调用边界 → 轮换
+          // streamingTextId + cutSegment），发送时只携带边界后新段的文本，
+          // 杜绝在新 streamingTextId 下叠加下发旧 id 段内容。
           outboundQueue.enqueue({
             taskId: partialTaskId,
             label: "partial",
@@ -820,7 +880,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
                 sessionId,
                 taskId: partialTaskId,
                 messageId: partialMessageId,
-                text: fullText,
+                text: assembler.getFullText(),
                 append: false,
                 final: false,
                 log: false,

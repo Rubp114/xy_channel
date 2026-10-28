@@ -12,7 +12,7 @@ import { createXYReplyDispatcher } from "./reply-dispatcher.js";
 import { parseA2AMessage, extractTextFromParts, extractFileParts, extractPushId, extractDeviceType, extractAppVer, extractSdkApiVersion, extractModelName, extractTriggerData, extractRunCrossTaskContext, isClearContextMessage, isTasksCancelMessage } from "../parser.js";
 import { downloadFilesFromParts } from "../file-download.js";
 import { resolveXYConfig } from "../config.js";
-import { sendStatusUpdate, sendClearContextResponse, sendTasksCancelResponse, sendA2AResponse } from "../formatter.js";
+import { sendClearContextResponse, sendTasksCancelResponse, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
 import {
   appendSelfEvolutionKeywordNudge,
   shouldNudgeForSelfEvolutionKeyword,
@@ -43,6 +43,7 @@ import {
   cacheXYConfig,
   getCurrentTaskId,
   clearWaitState,
+  getOrCreateSession,
 } from "../conversation/conversation-manager.js";
 import { clearPendingApproval } from "../approval-bridge.js";
 import type { A2AJsonRpcRequest } from "../types.js";
@@ -259,6 +260,29 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     const config = resolveXYConfig(cfg);
     cacheXYConfig(config);
 
+    // 对话轮开始：下发 DisplayTaskCardData 起始卡（index=1，任务正在处理中）。
+    // 走会话出站队列而非直发，排在上一 turn 可能在途的终态帧之后（steer 场景）；
+    // 配对卡的 final 帧由 reply-dispatcher / conversation-manager 在对话轮结束时下发。
+    {
+      const startSession = getOrCreateSession(parsed.sessionId);
+      const startTaskId = parsed.taskId;
+      const startMessageId = parsed.messageId;
+      startSession.outboundQueue.enqueue({
+        taskId: startTaskId,
+        label: "task-card-start",
+        send: () =>
+          sendDisplayTaskCardData({
+            config,
+            sessionId: parsed.sessionId,
+            taskId: startTaskId,
+            messageId: startMessageId,
+            index: 1,
+            stepName: "任务正在处理中",
+            isFinal: false,
+          }),
+      });
+    }
+
     // ✅ Resolve agent route (following feishu pattern)
     // accountId is "default" for XY (single account mode)
     // Use sessionId as peer.id to ensure all messages in the same session share context
@@ -351,19 +375,6 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         log.error(`[BOT] Failed to patch session model override:`, patchErr);
       }
     }
-
-    // 🔑 发送初始状态更新
-    log.log(`[BOT] Sending initial status update`);
-    void sendStatusUpdate({
-      config,
-      sessionId: parsed.sessionId,
-      taskId: parsed.taskId,
-      messageId: parsed.messageId,
-      text: "任务正在处理中，请稍候~",
-      state: "working",
-    }).catch((err) => {
-      log.error(`Failed to send initial status update:`, err);
-    });
 
     // Extract text and files from parts
     const text = extractTextFromParts(parsed.parts);
