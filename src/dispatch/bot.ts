@@ -10,7 +10,7 @@ import { downloadFilesFromParts } from "../file-download.js";
 import { isImageAttachment } from "../model-input.js";
 import { loadNativeImages, NATIVE_IMAGE_MAX_BYTES, NativeImageInputError } from "../native-images.js";
 import { resolveXYConfig } from "../config.js";
-import { sendStatusUpdate, sendClearContextResponse, sendTasksCancelResponse, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
+import { sendClearContextResponse, sendTasksCancelResponse, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
 import {
   appendSelfEvolutionKeywordNudge,
   shouldNudgeForSelfEvolutionKeyword,
@@ -564,19 +564,6 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         }
       }
     }
-
-    // 🔑 发送初始状态更新
-    log.log(`[BOT] Sending initial status update`);
-    void sendStatusUpdate({
-      config,
-      sessionId: parsed.sessionId,
-      taskId: parsed.taskId,
-      messageId: parsed.messageId,
-      text: "思考中",
-      state: "working",
-    }).catch((err) => {
-      log.error(`Failed to send initial status update:`, err);
-    });
 
     registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
     turnRegistered = true;
