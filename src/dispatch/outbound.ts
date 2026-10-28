@@ -127,15 +127,15 @@ export const xyOutbound: ChannelOutboundAdapter = {
 
     // ── Cron 聚合闸门（对话管理层）─────────────────────────────
     // 定时任务执行期间的所有 sendText 一律吞掉（返回合成成功，保证
-    // openclaw durable-delivery 记账正常），只放行 cron run 结束后的
-    // announce 最终结果（唯一一条 push）。
+    // openclaw durable-delivery 记账正常），run 结束后的 announce 与已收集的
+    // 各轮 assistant/message 工具文本去重合并，保存并推送唯一一条完整内容。
     // announce 时 meta 是 gate 同步快照的 cron 元数据（jobId/title），
     // 随 push 下发供客户端识别来源；其余路径 meta 为 null。
     // announceLike（无显式 target：to 为空或 DEFAULT_PUSH_MARKER）用于并发
     // 场景下把 announce 与中间消息粗路由到正确的 job turn —— sendText 层
     // 拿不到 jobId/runId。
     const announceLike = !to || to === DEFAULT_PUSH_MARKER;
-    const { gate: cronGate, meta: cronMeta } = gateCronSendText(
+    const { gate: cronGate, meta: cronMeta, text: cronMergedText } = gateCronSendText(
       text as string,
       announceLike,
       config,
@@ -208,10 +208,14 @@ export const xyOutbound: ChannelOutboundAdapter = {
     }
 
     // 1. 持久化推送消息内容，获取 pushDataId（cron announce 时附带 cron 元数据）
+    const outboundText = cronGate === "announce" ? cronMergedText ?? (text as string) : (text as string);
+    if (cronGate === "announce" && outboundText !== text) {
+      logger.log(`[xyOutbound.sendText] Cron announce merged with buffered assistant text, len=${outboundText.length}`);
+    }
     logger.log(`[xyOutbound.sendText] Saving push data to local storage...`);
     let pushDataId: string;
     try {
-      pushDataId = await savePushData(text, cronMeta
+      pushDataId = await savePushData(outboundText, cronMeta
         ? { cronJobId: cronMeta.jobId, cronTitle: cronMeta.jobTitle }
         : undefined);
       logger.log(`[xyOutbound.sendText] Push data saved with ID: ${pushDataId.substring(0, 20)}`);
@@ -222,8 +226,8 @@ export const xyOutbound: ChannelOutboundAdapter = {
     }
 
     // 2. 经 outbound-gateway 广播推送（pushId 加载与多设备遍历收口在网关内）
-    const title = text.split("\n")[0].slice(0, 57);
-    const pushText = text.length > 1000 ? text.slice(0, 1000) : text;
+    const title = outboundText.split("\n")[0].slice(0, 57);
+    const pushText = outboundText.length > 1000 ? outboundText.slice(0, 1000) : outboundText;
 
     logger.log(`[xyOutbound.sendText] Broadcasting push via outbound-gateway...`);
     await pushBroadcast({

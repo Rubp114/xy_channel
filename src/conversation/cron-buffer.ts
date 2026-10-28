@@ -14,10 +14,12 @@
 // 聚合策略：
 //   - run 期间的所有 sendText 一律吞掉（返回合成成功，保证 openclaw
 //     durable-delivery 记账正常、不进重试），文本入缓冲。
+//   - 同时通过 assistant 事件收集每轮模型正文。openclaw announce 只携带最后
+//     一条 assistant 文本；正文后若还有工具调用/补充说明，只放行 announce
+//     会丢掉前面的正文，因此最终必须与缓冲合并。
 //   - run 结束信号（lifecycle phase=end，index.ts 的 agent event
 //     subscription → notifyCronAgentEnd）后进入 10s 宽限期：
-//       · 宽限期内 announce sendText 到达 → 放行 announce（优先，唯一一条），
-//         丢弃缓冲；
+//       · 宽限期内 announce sendText 到达 → 与缓冲去重合并为唯一一条 push；
 //       · 宽限期结束无 announce（路径 B）→ 缓冲文本合并为一条 push 发出。
 //   - 120s 安全超时兜底：强制 flush 缓冲并关闭，防泄漏到下一个 run。
 //
@@ -49,8 +51,10 @@ interface CronTurnState {
   /** agentEnded 置位时刻（announce 宽限开始，多个 ended turn 的 FIFO 排序依据）。 */
   endedAt: number;
   agentEnded: boolean;
-  /** run 期间被吞文本的缓冲（聚合发送用）。 */
+  /** run 期间被吞文本及已结束的 assistant 段（聚合发送用）。 */
   bufferedTexts: string[];
+  /** 当前 assistant 消息的累计文本；下一条消息开始时锁存到 bufferedTexts。 */
+  currentAssistantText: string;
   /** 吞没 sendText 时保存的 config（flush 用，进程内可靠来源）。 */
   config?: XYChannelConfig;
   safetyTimer: NodeJS.Timeout;
@@ -68,6 +72,63 @@ const UNKNOWN_JOB_KEY = "__unknown__";
 
 function normalizeKey(jobId?: string): string {
   return jobId ?? UNKNOWN_JOB_KEY;
+}
+
+/** 按原始顺序追加一段文本；相邻完全相同的 announce/工具文本只保留一份。 */
+function appendBufferedText(turn: CronTurnState, text: string | undefined): void {
+  const normalized = text?.trim();
+  if (!normalized || turn.bufferedTexts.at(-1) === normalized) return;
+  turn.bufferedTexts.push(normalized);
+  if (turn.bufferedTexts.length > MAX_BUFFERED_KEPT) turn.bufferedTexts.shift();
+}
+
+/** 当前 assistant 段结束时锁存，保证它与 message 工具文本的相对顺序。 */
+function latchAssistantText(turn: CronTurnState): void {
+  if (!turn.currentAssistantText) return;
+  appendBufferedText(turn, turn.currentAssistantText);
+  turn.currentAssistantText = "";
+}
+
+/** 获取完整缓冲快照；快照前先把仍在累计的 assistant 段纳入结果。 */
+function getBufferedTexts(turn: CronTurnState): string[] {
+  latchAssistantText(turn);
+  return turn.bufferedTexts.slice();
+}
+
+/**
+ * 收集 openclaw assistant 流事件。data.text 在同一消息内是累计文本，下一条
+ * assistant 消息会重新从头开始；replace=true 表示同一消息的权威替换帧。
+ * sessionKey 已在 index.ts 中解析成 jobId，因此并发 cron 不会串文本。
+ */
+export function captureCronAssistantText(
+  jobId: string | undefined,
+  text: string | undefined,
+  replace = false,
+): void {
+  const turn = getTurnRegistry().get(normalizeKey(jobId));
+  const next = text?.trim();
+  if (!turn || !next) return;
+
+  if (replace) {
+    turn.currentAssistantText = next;
+    return;
+  }
+
+  const current = turn.currentAssistantText;
+  if (!current) {
+    // 迟到的重复帧不再形成新段；不同消息内容相同也无需重复推送。
+    if (turn.bufferedTexts.at(-1) !== next) turn.currentAssistantText = next;
+    return;
+  }
+  if (next === current) return;
+  if (next.startsWith(current)) {
+    turn.currentAssistantText = next;
+    return;
+  }
+
+  latchAssistantText(turn);
+  turn.currentAssistantText = next;
+  logger.log(`[CRON-BUFFER] Assistant segment latched, jobId=${turn.jobId ?? "-"}, nextLen=${next.length}`);
 }
 
 const _g = globalThis as Record<string, unknown>;
@@ -156,6 +217,7 @@ export function notifyCronDetected(jobId?: string, jobTitle?: string): void {
     endedAt: 0,
     agentEnded: false,
     bufferedTexts: [],
+    currentAssistantText: "",
     safetyTimer: armSafetyTimer(key),
   };
   registry.set(key, turn);
@@ -167,7 +229,7 @@ function armSafetyTimer(key: string): NodeJS.Timeout {
     const turn = getTurnRegistry().get(key);
     if (!turn) return;
     logger.warn(`[CRON-BUFFER] Safety timeout (${CRON_SAFETY_TIMEOUT_MS}ms) reached, jobId=${turn.jobId ?? "-"}, agentEnded=${turn.agentEnded}, buffered=${turn.bufferedTexts.length}`);
-    const flushed = turn.bufferedTexts.slice();
+    const flushed = getBufferedTexts(turn);
     const meta: CronTurnMeta = { jobId: turn.jobId, jobTitle: turn.jobTitle };
     const config = turn.config;
     closeCronTurn(turn.jobId, "safety-timeout");
@@ -217,7 +279,7 @@ function startGrace(turn: CronTurnState, key: string): void {
     const t = getTurnRegistry().get(key);
     if (!t) return;
     logger.log(`[CRON-BUFFER] Announce grace expired, jobId=${t.jobId ?? "-"}, buffered=${t.bufferedTexts.length}`);
-    const flushed = t.bufferedTexts.slice();
+    const flushed = getBufferedTexts(t);
     const meta: CronTurnMeta = { jobId: t.jobId, jobTitle: t.jobTitle };
     const config = t.config;
     closeCronTurn(t.jobId, "announce-grace-expired");
@@ -233,6 +295,8 @@ export type CronSendTextGate = "swallow" | "announce" | "none";
 
 export interface CronGateResult {
   gate: CronSendTextGate;
+  /** gate === "announce" 时应实际保存/推送的去重合并全文。 */
+  text?: string;
   /**
    * gate === "announce" 时的 cron 元数据同步快照（其余情况为 null）。
    * 快照在 gate 返回时完成 —— 调用方后续 await 空窗期内 turn 可能被
@@ -268,8 +332,11 @@ export function gateCronSendText(
     if (ended.length > 0) {
       const t = ended[0];
       if (config) t.config = config;
+      latchAssistantText(t);
+      appendBufferedText(t, swallowedText);
       return {
         gate: "announce",
+        text: t.bufferedTexts.join("\n\n").trim(),
         meta: { jobId: t.jobId, jobTitle: t.jobTitle },
         jobId: t.jobId,
       };
@@ -279,10 +346,8 @@ export function gateCronSendText(
     if (active.length === 1) {
       const t = active[0];
       if (config) t.config = config;
-      if (swallowedText && swallowedText.trim()) {
-        t.bufferedTexts.push(swallowedText.trim());
-        if (t.bufferedTexts.length > MAX_BUFFERED_KEPT) t.bufferedTexts.shift();
-      }
+      latchAssistantText(t);
+      appendBufferedText(t, swallowedText);
       return { gate: "swallow", meta: null, jobId: t.jobId };
     }
     // 多活跃 turn：无法归属，安全回退。
@@ -294,10 +359,8 @@ export function gateCronSendText(
   if (active.length === 1) {
     const t = active[0];
     if (config) t.config = config;
-    if (swallowedText && swallowedText.trim()) {
-      t.bufferedTexts.push(swallowedText.trim());
-      if (t.bufferedTexts.length > MAX_BUFFERED_KEPT) t.bufferedTexts.shift();
-    }
+    latchAssistantText(t);
+    appendBufferedText(t, swallowedText);
     return { gate: "swallow", meta: null, jobId: t.jobId };
   }
   if (active.length === 0) {

@@ -25,7 +25,7 @@ import {
   markSubagentEnded,
   deliverSubagentFinalResult,
 } from "./src/conversation/conversation-manager.js";
-import { notifyCronAgentEnd } from "./src/conversation/cron-buffer.js";
+import { captureCronAssistantText, notifyCronAgentEnd } from "./src/conversation/cron-buffer.js";
 import { logger } from "./src/utils/logger.js";
 
 /**
@@ -566,32 +566,41 @@ function registerFullHooks(api: OpenClawPluginApi) {
   // SUBAGENT HOOKS: track subagent spawn/end lifecycle for session keep-alive
   registerSubagentHooks(api);
 
-  // CRON AGGREGATION: 通过 agent 事件总线感知 cron isolated run 结束。
+  // CRON AGGREGATION: 通过 agent 事件总线收集 cron isolated run 的每轮
+  // assistant 正文并感知结束。announce 只携带最后一条 assistant 文本，正文后
+  // 若还有工具调用/补充说明，仅监听 sendText 会丢失前序正文。
   // 注意：agent_end 插件 hook 只在 dispatch-from-config 路径触发，cron
   // isolated run 不会触发它；embedded run 的 lifecycle 事件才是可靠信号。
-  // phase=end/error 后到达的 sendText 即为 announce 最终结果（放行）。
   api.agent.events.registerAgentEventSubscription({
     id: "xy-cron-turn-tracker",
-    description: "Track cron isolated run completion for sendText aggregation",
-    streams: ["lifecycle"],
+    description: "Aggregate cron assistant text and track run completion",
+    streams: ["lifecycle", "assistant"],
     handle: (event) => {
       try {
-        const phase = event?.data?.phase;
+        const sessionKey = event?.sessionKey ?? "";
+        // 从 sessionKey（agent:<id>:cron:<jobId>:run:<ts>）解析 jobId，只处理
+        // 该 job 的 turn；isCronActive(jobId) 作为无 cron 前缀版本的兜底（按
+        // jobId 精确判断，普通对话的 assistant/lifecycle 不会命中）。
+        const cronJobId = parseCronJobIdFromSessionKey(sessionKey);
+        if (!sessionKey.includes("cron:") && !sessionKey.startsWith("cron:") && !isCronActive(cronJobId)) return;
+
+        if (event.stream === "assistant") {
+          captureCronAssistantText(
+            cronJobId,
+            typeof event.data?.text === "string" ? event.data.text : undefined,
+            event.data?.replace === true,
+          );
+          return;
+        }
+
         // 仅 phase=end 是 run 级终态信号；phase=error 可能是单次模型调用
         // 失败（后续还有重试/start），不能据此放行 announce。
         // 真正失败的 run（无 end）由 120s 安全超时兜底 flush 缓冲文本。
-        if (phase !== "end") return;
-        const sessionKey = event?.sessionKey ?? "";
-        // 从 sessionKey（agent:<id>:cron:<jobId>:run:<ts>）解析 jobId，只结束
-        // 该 job 的 turn；isCronActive(jobId) 作为无 cron 前缀版本的兜底（按
-        // jobId 精确判断，普通对话的 lifecycle end 不会命中）。
-        const cronJobId = parseCronJobIdFromSessionKey(sessionKey);
-        if (sessionKey.includes("cron:") || sessionKey.startsWith("cron:") || isCronActive(cronJobId)) {
-          logger.log(`[XY-CRON] Cron run lifecycle end, sessionKey=${sessionKey || "unknown"}, jobId=${cronJobId ?? "-"}`);
-          notifyCronAgentEnd(cronJobId);
-        }
+        if (event.stream !== "lifecycle" || event?.data?.phase !== "end") return;
+        logger.log(`[XY-CRON] Cron run lifecycle end, sessionKey=${sessionKey || "unknown"}, jobId=${cronJobId ?? "-"}`);
+        notifyCronAgentEnd(cronJobId);
       } catch (err) {
-        logger.error(`[XY-CRON] Error in cron lifecycle subscription:`, err);
+        logger.error(`[XY-CRON] Error in cron event subscription:`, err);
       }
     },
   });
