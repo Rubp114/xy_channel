@@ -121,13 +121,22 @@ async function callImageUnderstandingAPI(
     ],
   };
 
+  // 图片理解 SSE 读流必须有的时钟上限。node-fetch v3 已移除 timeout 选项
+  // （写了也白写，被静默忽略），这里改用 AbortController 兜住：
+  // 达到时限主动中止，让 for await 因 AbortError 立即结束，工具必然在限时内返回。
+  const IMAGE_UNDERSTAND_SSE_TIMEOUT_MS = 90_000;
+  const controller = new AbortController();
+  const overallTimer = setTimeout(() => controller.abort(), IMAGE_UNDERSTAND_SSE_TIMEOUT_MS);
+  const sseStartedAt = Date.now();
+  const isSseTimedOut = () => Date.now() - sseStartedAt >= IMAGE_UNDERSTAND_SSE_TIMEOUT_MS;
+
   try {
     const response = await fetch(apiUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
-      // @ts-ignore - node-fetch supports this
-      timeout: 120000, // 2 minutes timeout
+      // node-fetch v3 用 AbortSignal 实现超时/终止，替代 v2 时代的 timeout 选项
+      signal: controller.signal,
     });
 
     if (!response.ok) {
@@ -137,15 +146,18 @@ async function callImageUnderstandingAPI(
 
     // Process SSE stream
     let lastCaption = "";
-    let lineCount = 0;
     let buffer = "";
+    let streamDone = false;
 
     // Read the response body as a stream
     if (!response.body) {
       throw new Error("Response body is null");
     }
 
+    // for await 在 controller.abort() 后会因 AbortError 退出；
+    // 同时用 [DONE] / 首个有效结果 / 硬时限做提前 break，避免傻等 EOF。
     for await (const chunk of response.body) {
+      if (streamDone || isSseTimedOut()) break;
       if (!chunk) continue;
 
       buffer += chunk.toString();
@@ -153,7 +165,6 @@ async function callImageUnderstandingAPI(
       buffer = lines.pop() || "";
 
       for (const line of lines) {
-        lineCount++;
         const trimmedLine = line.replace(/\r$/, "");
 
         if (!trimmedLine) continue;
@@ -161,7 +172,14 @@ async function callImageUnderstandingAPI(
         if (trimmedLine.startsWith("data:")) {
           const dataContent = trimmedLine.substring(5).trim();
 
-          if (dataContent && dataContent !== "[DONE]") {
+          // 结束标记：不再继续等流，直接离场
+          if (dataContent === "[DONE]") {
+            buffer = "";
+            streamDone = true;
+            break;
+          }
+
+          if (dataContent) {
             try {
               const dataJson = JSON.parse(dataContent);
 
@@ -181,6 +199,9 @@ async function callImageUnderstandingAPI(
           }
         }
       }
+
+      // 拿到首个有效识别结果即收工，或已收到 [DONE]，不再继续等待后续流数据
+      if (lastCaption || streamDone || isSseTimedOut()) break;
     }
 
     if (!lastCaption) {
@@ -189,7 +210,12 @@ async function callImageUnderstandingAPI(
 
     return lastCaption;
   } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Image understanding API timed out");
+    }
     throw error;
+  } finally {
+    clearTimeout(overallTimer);
   }
 }
 
@@ -252,19 +278,37 @@ export const imageReadingTool = {
       const allImageUrls: string[] = [];
 
       try {
-        for (const imageInput of images) {
-          allImageUrls.push(await processImageInput(imageInput, uploadService));
-        }
+        // 工具整体硬超时兜底：即使上传/识别任一段失联，整个 execute 也必须在
+        // 限时内结束（内部 callImageUnderstandingAPI 已有 90s SSE 超时，这里再
+        // 兜住包含 OBS 上传在内的整段工具执行）。
+        let toolTimeoutTimer: NodeJS.Timeout | undefined;
+        const caption = await Promise.race([
+          (async () => {
+            for (const imageInput of images) {
+              allImageUrls.push(await processImageInput(imageInput, uploadService));
+            }
 
-        // Call image understanding API with all image URLs
-        const caption = await callImageUnderstandingAPI(
-          allImageUrls,
-          prompt,
-          config.apiKey,
-          config.uid,
-          config.fileUploadUrl,
-          sessionId
-        );
+            // Call image understanding API with all image URLs
+            return callImageUnderstandingAPI(
+              allImageUrls,
+              prompt,
+              config.apiKey,
+              config.uid,
+              config.fileUploadUrl,
+              sessionId
+            );
+          })(),
+          new Promise<never>((_, reject) => {
+            toolTimeoutTimer = setTimeout(
+              () => reject(new Error("图片理解工具执行超时")),
+              100_000
+            );
+          }),
+        ]);
+        // 工具在超时前完成：清掉兜底定时器，避免残留 timer 拖住进程
+        if (toolTimeoutTimer) {
+          clearTimeout(toolTimeoutTimer);
+        }
 
         return {
           content: [
