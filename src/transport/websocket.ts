@@ -360,14 +360,23 @@ export class XYWebSocketManager extends EventEmitter {
       });
 
       ws.on("message", (data: WebSocket.Data) => {
+        if (this.ws !== ws) return; // stale connection, ignore
         this.handleMessage(data);
       });
 
       ws.on("close", (code: number, reason: Buffer) => {
+        if (this.ws !== ws) {
+          this.log("Ignoring close event from stale connection");
+          return;
+        }
         this.handleClose(code, reason.toString());
       });
 
       ws.on("error", (error: Error) => {
+        if (this.ws !== ws) {
+          this.log(`Ignoring error from stale connection: ${error.message}`);
+          return;
+        }
         this.handleError(error);
         if (!this.state.connected) {
           clearTimeout(connectTimeout);
@@ -423,6 +432,40 @@ export class XYWebSocketManager extends EventEmitter {
 
     // Start heartbeat
     this.startHeartbeat();
+
+    // ✅ init 后立即 ping 一次（快照恢复/重连场景）：
+    // pong 回来即触发 handleHeartbeatActivity，提前放行重连后的 10s 出站缓冲。
+    // 否则首个 interval ping 要等 30s，缓冲期内没有任何活性信号，基本必然死等满 10s。
+    // 注意：必须在 startHeartbeat() 之后发送，确保 pong 监听已挂载。
+    try {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.ping();
+        this.log("[WS-SEND] Immediate ping after init (liveness probe + early buffer flush)");
+      }
+    } catch (err) {
+      this.error("Failed to send immediate ping after init:", err);
+    }
+
+    // ✅ init 后立即发一条应用层心跳（nudge 服务端尽快投递积压消息）：
+    // 实测快照恢复场景，channel init 完成后服务端仍压消息 ~4s 才投递
+    // （消息 10:10:37.7 已到服务端，10:10:40 init 完成，10:10:44 才收到）。
+    // 上面的 ws.ping() 是协议层的，服务端应用层不可见；这条应用层心跳
+    // 用于验证"服务端收到 agent 消息即触发路由/重投"的假设——
+    // 若成立则积压消息投递延迟 4s → ~0s；若服务端是纯定时器重试则无效果也无副作用。
+    try {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(
+          JSON.stringify({
+            msgType: "heartbeat",
+            agentId: this.config.agentId,
+            msgDetail: JSON.stringify({ timestamp: Date.now() }),
+          }),
+        );
+        this.log("[WS-SEND] Immediate app-level heartbeat after init (nudge server to flush pending)");
+      }
+    } catch (err) {
+      this.error("Failed to send immediate app-level heartbeat after init:", err);
+    }
   }
 
   /**
@@ -431,23 +474,29 @@ export class XYWebSocketManager extends EventEmitter {
   private startHeartbeat(): void {
     if (!this.ws) return;
 
+    // Defensive: stop any previous heartbeat instance before superseding it
+    this.heartbeat?.stop();
+
     const heartbeat = new HeartbeatManager(
       this.ws,
       {
         interval: 30000, // 30 seconds
         timeout: 10000, // 10 seconds
-        message: JSON.stringify({
-          msgType: "heartbeat",
-          agentId: this.config.agentId,
-          msgDetail: JSON.stringify({ timestamp: Date.now() }),
-        }),
+        // 工厂函数：每次发送时现拼，时间戳取当前值（修复旧时间戳被服务端丢弃的问题）
+        message: () =>
+          JSON.stringify({
+            msgType: "heartbeat",
+            agentId: this.config.agentId,
+            msgDetail: JSON.stringify({ timestamp: Date.now() }),
+          }),
       },
       () => {
         this.error("Heartbeat timeout, reconnecting...");
-        // ✅ Close connection first before reconnecting
+        // 心跳已判定死链：对端不会回应 close 握手（ws 库要等 30s 超时才 emit close），
+        // 用 terminate() 立即销毁 socket，close 事件即刻触发 → handleClose → 重连，避免 30s 挂起
         if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-          this.log("Closing connection due to heartbeat timeout");
-          this.ws.close(); // This will trigger handleClose which will call reconnectServer
+          this.log("Terminating connection due to heartbeat timeout");
+          this.ws.terminate(); // Triggers close event immediately → handleClose → reconnectServer
         } else {
           // Connection already closed, just reconnect
           this.reconnectServer();
@@ -456,7 +505,7 @@ export class XYWebSocketManager extends EventEmitter {
       "websocket",
       this.log,
       this.error,
-      this.onHealthEvent
+      () => this.handleHeartbeatActivity(),
     );
 
     heartbeat.start();
@@ -796,7 +845,9 @@ export class XYWebSocketManager extends EventEmitter {
       // Handle heartbeat responses
       if (inboundMsg.msgType === "heartbeat") {
         log.log("[XY] Received heartbeat response");
-        this.onHealthEvent?.();
+        // 应用层心跳响应也算活性证据：重置超时定时器，避免只认协议 pong 导致误判超时
+        this.heartbeat?.notifyActivity();
+        this.handleHeartbeatActivity();
         return;
       }
 
@@ -958,6 +1009,27 @@ export class XYWebSocketManager extends EventEmitter {
   }
 
   /**
+   * Handle connection activity (protocol pong or app-level heartbeat response).
+   * Reports health and flushes the reconnect buffer early instead of waiting the full 10s.
+   */
+  private handleHeartbeatActivity(): void {
+    this.onHealthEvent?.();
+
+    // 重连缓冲期内收到首个活性信号，立即放行队列，不再死等 10s
+    if (this.isBuffering && this.reconnectBufferTimer) {
+      clearTimeout(this.reconnectBufferTimer);
+      this.reconnectBufferTimer = null;
+      this.messageQueue.flush((msg) => {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify(msg));
+        }
+      });
+      this.isBuffering = false;
+      this.log("[MessageQueue] Activity detected during buffer period, flushed queue early");
+    }
+  }
+
+  /**
    * Handle connection error.
    */
   private handleError(error: Error): void {
@@ -966,7 +1038,9 @@ export class XYWebSocketManager extends EventEmitter {
   }
 
   /**
-   * Reconnect with exponential backoff.
+   * Reconnect with fast-retry-then-backoff schedule.
+   * 前几次快速重试（0.5/1/1/2/4s + 随机抖动），之后指数退避封顶 30s。
+   * 修复：旧版首次就 1s 起步指数增长，503 场景累计 31s+10s 缓冲 = 42s 才恢复。
    */
   private reconnectServer(): void {
     if (this.isShuttingDown) return;
@@ -979,8 +1053,14 @@ export class XYWebSocketManager extends EventEmitter {
 
     this.state.reconnectAttempts++;
 
-    const delay = Math.min(1000 * Math.pow(2, this.state.reconnectAttempts - 1), 30000);
-    this.log(`Reconnecting in ${delay}ms (attempt ${this.state.reconnectAttempts})...`);
+    const FAST_RETRY_SCHEDULE = [500, 1000, 1000, 2000, 4000];
+    const attempt = this.state.reconnectAttempts;
+    const base =
+      attempt <= FAST_RETRY_SCHEDULE.length
+        ? FAST_RETRY_SCHEDULE[attempt - 1]
+        : Math.min(1000 * Math.pow(2, attempt - 1), 30000);
+    const delay = base + Math.floor(Math.random() * 250); // 随机抖动，避免多实例同步重连
+    this.log(`Reconnecting in ${delay}ms (attempt ${attempt})...`);
 
     const timer = setTimeout(() => {
       this.reconnectTimer = null;
