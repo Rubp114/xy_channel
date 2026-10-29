@@ -236,10 +236,13 @@ export function createLegacyReplyDispatcher(params: CreateXYReplyDispatcherParam
   // ── 文本装配与出站时序由对话管理层拥有 ─────────────────────
   // assembler：model/injected 段拼接 + deliver 权威文本修正，生命周期随本
   // dispatcher（同时挂载到 session 上，供 display-a2ui-card 等工具注入文本段）。
+  // 低版本链路（app_ver < 11.7.8.357）：accumulateModelSegments=false ——
+  // 模型不同轮产生的回复文本不允许累加，跨调用边界处清空历史装配文本，
+  // 下一轮发送的正文（含终帧全文本）只携带本轮模型回复。
   // outboundQueue：会话级出站 FIFO，所有出站帧的唯一时序收口（partial 帧
   // coalescing、终态帧 delayMs）。dispatcher 只做事件翻译和业务决策。
   const session = getOrCreateSession(sessionId);
-  const assembler = new StreamAssembler();
+  const assembler = new StreamAssembler({ accumulateModelSegments: false });
   session.assembler = assembler;
   const outboundQueue = session.outboundQueue;
   // 终态帧延迟：正文 artifact 与终态帧几乎同一毫秒发出，下游服务端对长正文
