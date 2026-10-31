@@ -12,12 +12,19 @@
 
 import { randomUUID } from "crypto";
 import { logger } from "../utils/logger.js";
-import { releaseStreamingTextId, rotateStreamingTextId } from "../utils/streaming-text-id.js";
+import { releaseStreamingTextId, rotateStreamingTextId, peekStreamingTextId } from "../utils/streaming-text-id.js";
 import { releaseStatusCardSeq, getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
-import { markLastChunkBlock, getAccumulatedThinkIndex, releaseThinkIndex } from "../utils/think-index.js";
+import { markLastChunkBlock, markReasoningBlockEnd, getAccumulatedThinkIndex, peekLastReasoningBlockSeq, releaseThinkIndex } from "../utils/think-index.js";
 import { releaseAppVersion } from "../utils/app-version.js";
 import { clearBodyTextState } from "../utils/body-text-state.js";
-import { sendStatusUpdate, sendA2AResponse, sendDisplayTaskCardData, sendExecuteStatusCard } from "../formatter.js";
+import {
+  isReasoningSegmentOpen,
+  closeReasoningSegment,
+  cutReasoningSegment,
+  peekReasoningSegmentText,
+  releaseReasoningSegment,
+} from "../utils/reasoning-segment.js";
+import { sendStatusUpdate, sendA2AResponse, sendDisplayTaskCardData, sendExecuteStatusCard, sendReasoningTextUpdate } from "../formatter.js";
 import type { XYChannelConfig } from "../types.js";
 import {
   ConversationSession,
@@ -66,13 +73,14 @@ export function deleteSession(sessionId: string): void {
   const session = sessions.get(sessionId);
   session?.outboundQueue.destroy();
   // 会话销毁：释放其任务链上所有 turn 的 streamingTextId、状态卡序号、
-  // thinkIndex 标记、App 版本标记与正文首帧标记
+  // thinkIndex 标记、App 版本标记、正文首帧标记与思考分段状态
   for (const entry of session?.tasks ?? []) {
     releaseStreamingTextId(entry.taskId);
     releaseStatusCardSeq(entry.taskId);
     releaseThinkIndex(entry.taskId);
     releaseAppVersion(entry.taskId);
     clearBodyTextState(entry.taskId);
+    releaseReasoningSegment(entry.taskId);
   }
   sessions.delete(sessionId);
 }
@@ -126,6 +134,7 @@ export function completeTask(sessionId: string, expectedTaskId?: string): void {
     logger.log(`[TASK_MANAGER] Removing taskId`);
     for (const entry of session.tasks) {
       releaseStreamingTextId(entry.taskId);
+      releaseReasoningSegment(entry.taskId);
     }
     session.tasks = [];
     return;
@@ -139,6 +148,7 @@ export function completeTask(sessionId: string, expectedTaskId?: string): void {
   }
   session.tasks = nextTasks;
   releaseStreamingTextId(expectedTaskId);
+  releaseReasoningSegment(expectedTaskId);
   if (nextTasks.length > 0) {
     logger.log(`[TASK_MANAGER] Removed taskId ${expectedTaskId}, restored current taskId ${nextTasks[nextTasks.length - 1].taskId}`);
   } else {
@@ -154,16 +164,21 @@ export function getCurrentTask(sessionId: string): TaskEntry | null {
 }
 
 /**
- * 文本分段边界（工具调用/返回时调用，见 step-info-tool），按序完成三个副作用：
- *   1. 旧段收尾：装配器有内容时，以当前（旧）streamingTextId 经出站队列
+ * 文本分段边界（工具调用/返回时调用，见 step-info-tool），按序完成四个副作用：
+ *   1. 正文旧段收尾：装配器有内容时，以当前（旧）streamingTextId 经出站队列
  *      补发一帧旧段完整全文本（lastChunk=true，标识旧流文本块已结束），
  *      并等队列排空 —— 保证旧 id 段的尾部完整送达（在途 lazy partial 帧
  *      也在此期间以旧 id 发出）；
- *   2. 轮换该 turn 的 streamingTextId —— 后续文本帧使用新 id；
- *   3. 切分 session 的流式装配器 —— 后续 append:false 全量帧只携带边界
+ *   2. 思考旧段收尾：当前 id 下有未闭合思考流块时，以旧 id 补发该段完整
+ *      文本（lastChunk=true）并等队列排空 —— 保证每个携带过思考帧的 id
+ *      都有收尾帧，端侧不会拿到没有 lastChunk=true 的中间 id 段；
+ *   3. 轮换该 turn 的 streamingTextId，并切分思考段基线 —— 边界之后的
+ *      思考帧使用新 id，且只携带剥离基线后的增量段文本（端侧按 id 聚合
+ *      渲染，SDK 跨边界续流的全量快照含边界前文本，必须剥离）；
+ *   4. 切分 session 的流式装配器 —— 后续 append:false 全量帧只携带边界
  *      之后新段的文本，不再叠加旧 id 段内容。
- * 返回新 streamingTextId。无装配器/无内容（cron 等无 dispatcher 场景、
- * 或边界前尚无文本）时跳过收尾帧，仅轮换 id。
+ * 返回新 streamingTextId。无装配器/无内容且无未闭合思考块（cron 等无
+ * dispatcher 场景、或边界前尚无文本）时跳过收尾帧，仅轮换 id 与切分基线。
  */
 export async function rotateStreamingTextSegment(params: {
   config: XYChannelConfig;
@@ -201,6 +216,45 @@ export async function rotateStreamingTextSegment(params: {
     });
     await session.outboundQueue.whenIdle();
   }
+
+  // 思考段收尾帧：lastChunk=true 标识当前 id 的思考流块已结束。与正文收尾
+  // 同理不设 coalesceKey（协议关键帧，不可被合并丢弃）；isReasoningFinished
+  // 显式 pin false —— 思考未结束、仅是分段边界（端侧按 lastChunk 闭合段，
+  // 该字段无实际作用）。闭环依赖 whenIdle：收尾帧与在途思考帧的 drain 先
+  // 于轮换，drain 时 lazy 读 id 的帧也仍以旧 id 发出。
+  if (session && isReasoningSegmentOpen(taskId)) {
+    // 攒入思考块的 taskUniqIndexId（与 onReasoningEnd 同理，终态汇总卡统一
+    // 携带），同步标记不受出站队列时序影响；同时登记为本 turn 最近闭合
+    // 思考块，汇总卡组装时按登记值剔除最后一个思考块。
+    markReasoningBlockEnd(taskId, getCurrentStatusCardSeq(taskId));
+    // 同步闭合分段（不等收尾帧 drain），onReasoningEnd 据此不再补标记帧
+    closeReasoningSegment(taskId);
+    // 段文本与 streamingTextId 均在入队时捕获/pin —— drain 期间新快照或
+    // 轮换不影响本帧归属
+    const segmentText = peekReasoningSegmentText(taskId);
+    const streamingTextId = peekStreamingTextId(taskId);
+    session.outboundQueue.enqueue({
+      taskId,
+      label: "reasoning-segment-flush",
+      send: () =>
+        sendReasoningTextUpdate({
+          config,
+          sessionId,
+          taskId,
+          messageId,
+          text: segmentText,
+          append: false,
+          isReasoningFinished: false,
+          lastChunk: true,
+          streamingTextId,
+        }),
+    });
+    await session.outboundQueue.whenIdle();
+  }
+
+  // 思考段基线切分：无论本次是否发出思考收尾帧，id 即将轮换 —— 新 id 的
+  // 思考帧不得再携带边界前文本（后续快照剥离基线后只保留增量段）。
+  cutReasoningSegment(taskId);
 
   const newId = rotateStreamingTextId(taskId);
   assembler?.cutSegment();
@@ -652,8 +706,10 @@ export async function deliverSubagentFinalResult(params: {
       final: false,
       lastChunk: true,
     });
-  // 汇总状态卡：thinkIndex 攒批（除最后一轮正文外的前置轮 taskUniqIndexId），
-  // text=任务处理已完成；排在 final 帧之前。
+  // 汇总状态卡：thinkIndex 攒批，text=任务处理已完成；排在 final 帧之前。
+  // 携带规则（与 reply-dispatcher 终态路径一致）：除最后一个思考块和最后
+  // 一个正文段外其余块都进 thinkIndex —— 最后一轮正文 id = 当前卡序号
+  // （同 seq 即同一块，一并过滤）；最后一个思考块按最近闭合登记值剔除。
   const sendSummaryCard = () =>
     sendExecuteStatusCard({
       config,
@@ -662,7 +718,8 @@ export async function deliverSubagentFinalResult(params: {
       messageId: effectiveMessageId,
       text: "任务处理已完成",
       thinkIndex: getAccumulatedThinkIndex(effectiveTaskId)
-        .filter((id) => id !== String(getCurrentStatusCardSeq(effectiveTaskId))),
+        .filter((id) => id !== String(getCurrentStatusCardSeq(effectiveTaskId)))
+        .filter((id) => id !== peekLastReasoningBlockSeq(effectiveTaskId)),
     });
   // DisplayTaskCardData final 帧收尾对话轮（起始卡在 bot.ts 下发）；
   // 排在汇总卡之后（index 惰性读取，落在汇总卡序号上），final 帧之前。
