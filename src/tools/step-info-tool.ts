@@ -324,9 +324,10 @@ function resolveSendContext(
 
 // ── 命令下发 ───────────────────────────────────────────────────────
 
-/** 文本分段边界：以旧 id 补发旧段完整文本（lastChunk=true 收尾帧）并等队列
- *  排空，再轮换 streamingTextId、切分流式装配器 —— 其后的文本帧使用新 id，
- *  且只携带边界后新段的文本（端侧按 id 聚合流式文本段）。
+/** 文本分段边界：以旧 id 补发旧段完整文本（lastChunk=true 收尾帧，正文与
+ *  未闭合思考段各自收尾）并等队列排空，再轮换 streamingTextId、切分流式
+ *  装配器与思考段基线 —— 其后的文本帧使用新 id，且只携带边界后新段的
+ *  文本（端侧按 id 聚合流式文本段）。
  *  内部还会标记 thinkIndex 待下发值（见 utils/think-index）。 */
 async function rotateTextSegmentAtToolBoundary(params: {
   config: XYChannelConfig;

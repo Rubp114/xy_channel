@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from "uuid";
 import { sendWsFrame } from "./conversation/outbound-gateway.js";
 import { getOrCreateStreamingTextId, peekStreamingTextId, releaseStreamingTextId } from "./utils/streaming-text-id.js";
 import { isReasoningFinished as readReasoningFinished, releaseReasoningState } from "./utils/reasoning-state.js";
+import { releaseReasoningSegment } from "./utils/reasoning-segment.js";
 import { releaseStatusCardSeq, getCurrentStatusCardSeq, nextStatusCardSeq } from "./utils/status-card-seq.js";
 import { releaseThinkIndex } from "./utils/think-index.js";
 import { isLegacyAppVersion, releaseAppVersion } from "./utils/app-version.js";
@@ -187,6 +188,7 @@ export async function sendA2AResponse(params: SendA2AResponseParams): Promise<vo
   if (final) {
     releaseStreamingTextId(taskId);
     releaseReasoningState(taskId);
+    releaseReasoningSegment(taskId);
     releaseStatusCardSeq(taskId);
     releaseThinkIndex(taskId);
     releaseAppVersion(taskId);
@@ -210,8 +212,12 @@ export interface SendReasoningTextUpdateParams {
   /** 显式覆盖 isReasoningFinished（reasoning 结束标记帧传 true）；缺省读 turn 级状态表。 */
   isReasoningFinished?: boolean;
   /** 标识当前流文本块是否结束。思维链流式中间帧一律 false；仅 reasoning
-   *  结束标记帧（onReasoningEnd）传 true。 */
+   *  结束标记帧（onReasoningEnd）与分段边界思考收尾帧
+   *  （rotateStreamingTextSegment）传 true。 */
   lastChunk?: boolean;
+  /** 显式 pin 的 streamingTextId（入队时捕获）：帧归属产生它的文本段，
+   *  不受出站队列 drain 期间分段轮换影响；缺省 drain 时 get-or-create。 */
+  streamingTextId?: string;
 }
 
 /**
@@ -238,7 +244,7 @@ export async function sendReasoningTextUpdate(params: SendReasoningTextUpdatePar
     append,
     lastChunk: params.lastChunk ?? false,
     final: false,
-    streamingTextId: getOrCreateStreamingTextId(taskId),
+    streamingTextId: params.streamingTextId ?? getOrCreateStreamingTextId(taskId),
     isReasoningFinished: params.isReasoningFinished ?? readReasoningFinished(taskId),
     artifact: {
       artifactId: uuidv4(),
@@ -927,6 +933,7 @@ export async function sendTriggerResponse(params: SendTriggerResponseParams): Pr
   // Trigger 帧 final=true：与 sendA2AResponse 终帧同样释放本 turn 的状态
   releaseStreamingTextId(taskId);
   releaseReasoningState(taskId);
+  releaseReasoningSegment(taskId);
   releaseStatusCardSeq(taskId);
   releaseThinkIndex(taskId);
   releaseAppVersion(taskId);

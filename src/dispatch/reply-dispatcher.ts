@@ -24,8 +24,15 @@ import {
 } from "../conversation/conversation-manager.js";
 import { StreamAssembler } from "../conversation/stream-assembler.js";
 import { markReasoningFinished, markReasoningStreaming } from "../utils/reasoning-state.js";
+import {
+  noteReasoningSnapshot,
+  peekReasoningSegmentText,
+  isReasoningSegmentOpen,
+  closeReasoningSegment,
+} from "../utils/reasoning-segment.js";
+import { getOrCreateStreamingTextId } from "../utils/streaming-text-id.js";
 import { getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
-import { markLastChunkBlock, getAccumulatedThinkIndex } from "../utils/think-index.js";
+import { markReasoningBlockEnd, getAccumulatedThinkIndex, peekLastReasoningBlockSeq } from "../utils/think-index.js";
 
 // ⚙️ 前缀是 openclaw 系统消息稳定标记（infra/system-message.ts SYSTEM_MARK）。
 // ACP 绑定会话 turn 结束会以 kind=final 尾随投递系统诊断通知（如
@@ -237,9 +244,9 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
 
   let hasSentResponse = false;
   let finalSent = false;
-  // 当前思考块的最新全量快照（onReasoningStream 的 append:false 语义即全量），
-  // 供 onReasoningEnd 的思考块结束标记帧携带全量文本
-  let lastReasoningText = "";
+  // 思考快照/段文本状态由 utils/reasoning-segment.ts 按 taskId 维护（含分段
+  // 基线剥离与开放标记），供 onReasoningStream 增量下发与 onReasoningEnd /
+  // 分段边界的收尾帧携带段文本。
 
   // ── 文本装配与出站时序由对话管理层拥有 ─────────────────────
   // assembler：model/injected 段拼接 + deliver 权威文本修正，生命周期随本
@@ -565,13 +572,17 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
               }
 
               // 🔑 汇总状态卡：thinkIndex 攒批（本 turn 内工具卡不逐张携带，
-              // 攒到这里统一下发）——携带除最后一轮正文外的前置轮文本块
-              // taskUniqIndexId（最后一轮正文的 id = 当前卡序号，过滤掉）。
+              // 攒到这里统一下发）。携带规则：除最后一个思考块和最后一个
+              // 正文段外，其余块都进 thinkIndex —— 最后一轮正文的 id = 当前
+              // 卡序号（同 seq 即同一块，一并过滤）；最后一个思考块按最近
+              // 闭合登记值剔除（结束时无法预知是否最后，终态时登记值即最后）。
               // 排在 final 帧之前：终态帧发出后服务端可能关闭本 turn。
               {
                 const currentSeq = getCurrentStatusCardSeq(terminalTaskId);
+                const lastReasoningSeq = peekLastReasoningBlockSeq(terminalTaskId);
                 const summaryThinkIndex = getAccumulatedThinkIndex(terminalTaskId)
-                  .filter((id) => id !== String(currentSeq));
+                  .filter((id) => id !== String(currentSeq))
+                  .filter((id) => id !== lastReasoningSeq);
                 outboundQueue.enqueue({
                   taskId: terminalTaskId,
                   label: "terminal-summary-card",
@@ -761,25 +772,34 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
         try {
           if (text.length > 0) {
             const reasoningTaskId = getActiveTaskId();
-            // 记录当前思考块最新全量快照（append:false 语义即全量），
-            // 供思考块结束标记帧携带
-            lastReasoningText = text;
+            // 分段剥离：SDK 快照为思考块级全量（append:false 语义），跨分段
+            // 边界续流时含边界前文本；端侧按 streamingTextId 聚合渲染，新 id
+            // 帧只下发剥离基线后的增量段（见 utils/reasoning-segment.ts）。
+            const segmentText = noteReasoningSnapshot(reasoningTaskId, text);
             // 新一轮 reasoning 流开始：复位 turn 级 isReasoningFinished
             // （同一 turn 可能有多个 reasoning 块：思考→工具→再思考）。
             markReasoningStreaming(reasoningTaskId);
-            outboundQueue.enqueue({
-              taskId: reasoningTaskId,
-              label: "reasoning-stream",
-              send: () =>
-                sendReasoningTextUpdate({
-                  config,
-                  sessionId,
-                  taskId: reasoningTaskId,
-                  messageId: getActiveMessageId(),
-                  text,
-                  append: false,
-                }),
-            });
+            // 段文本为空 = 快照相对分段基线无增量（边界切分后 SDK 重放的
+            // 旧段内容），跳过下发，避免新 id 重复展示边界前文本。
+            if (segmentText.length > 0) {
+              // 入队时 pin 住当前在役 streamingTextId：drain 期间若发生分段
+              // 轮换，本帧仍归属产生它的文本段，不被队列时序劈到相邻 id 上。
+              const streamingTextId = getOrCreateStreamingTextId(reasoningTaskId);
+              outboundQueue.enqueue({
+                taskId: reasoningTaskId,
+                label: "reasoning-stream",
+                send: () =>
+                  sendReasoningTextUpdate({
+                    config,
+                    sessionId,
+                    taskId: reasoningTaskId,
+                    messageId: getActiveMessageId(),
+                    text: segmentText,
+                    append: false,
+                    streamingTextId,
+                  }),
+              });
+            }
           }
         } catch (err) {
           scopedLog().error(`[REASONING-STREAM] Failed to send reasoning text:`, err);
@@ -787,38 +807,48 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
       },
 
       onReasoningEnd: async () => {
-        // SDK thinking_end：标记本 turn reasoning 结束，并补发思考块结束标记帧
-        // （携带本思考块的全量文本、append=false 快照语义、isReasoningFinished=true
-        // + lastChunk=true；两个标记都显式 pin 而非 lazy 读状态表，防止帧在队
-        // 期间新一轮 reasoning 复位状态导致标记帧丢失语义），让端侧及时收起
-        // 思维链面板并落定该块的完整内容。
+        // SDK thinking_end：标记本 turn reasoning 结束。当前 id 下确有未闭合
+        // 思考流块时补发思考块结束标记帧（携带本思考段的完整文本、append=false
+        // 快照语义、isReasoningFinished=true + lastChunk=true；两个标记都显式
+        // pin 而非 lazy 读状态表，防止帧在队期间新一轮 reasoning 复位状态导致
+        // 标记帧丢失语义），让端侧及时收起思维链面板并落定该段的完整内容。
+        // 分段边界已收尾（或本无思考内容）时不再补标记帧 —— 边界收尾帧已以
+        // 旧 id 闭合该段，此处再以新 id 补空标记帧会让端侧渲染空思考段。
         const endTaskId = getActiveTaskId();
         markReasoningFinished(endTaskId);
-        // 攒入思考文本块的 taskUniqIndexId：统一在终态汇总卡（text=任务处理
-        // 已完成）携带，中间状态卡不携带。同步标记（而非等标记帧 drain），
-        // 保证不受出站队列时序影响。
-        markLastChunkBlock(endTaskId, getCurrentStatusCardSeq(endTaskId));
         scopedLog().log(`[REASONING-END] Reasoning finished, taskId=${endTaskId}`);
 
         try {
-          // 结束标记帧携带本思考块的全量文本（append=false 快照语义），
-          // 值在入队时捕获 —— 防止 drain 前新一轮 reasoning 更新了快照
-          const reasoningFullText = lastReasoningText;
-          outboundQueue.enqueue({
-            taskId: endTaskId,
-            label: "reasoning-end",
-            send: () =>
-              sendReasoningTextUpdate({
-                config,
-                sessionId,
-                taskId: endTaskId,
-                messageId: getActiveMessageId(),
-                text: reasoningFullText,
-                append: false,
-                isReasoningFinished: true,
-                lastChunk: true,
-              }),
-          });
+          if (isReasoningSegmentOpen(endTaskId)) {
+            // 攒入思考文本块的 taskUniqIndexId：统一在终态汇总卡（text=任务
+            // 处理已完成）携带，中间状态卡不携带。同步标记（而非等标记帧
+            // drain），保证不受出站队列时序影响；同时登记为本 turn 最近闭合
+            // 思考块，汇总卡组装时按登记值剔除最后一个思考块。
+            markReasoningBlockEnd(endTaskId, getCurrentStatusCardSeq(endTaskId));
+            // 同步闭合分段（不等标记帧 drain），分段边界据此判断本段已收尾
+            closeReasoningSegment(endTaskId);
+            // 结束标记帧携带本思考段的完整文本（append=false 快照语义），
+            // 段文本与 streamingTextId 均在入队时捕获/pin —— 防止 drain 前
+            // 新一轮 reasoning 更新快照、或分段轮换把本帧劈到相邻 id 上
+            const reasoningSegmentText = peekReasoningSegmentText(endTaskId);
+            const streamingTextId = getOrCreateStreamingTextId(endTaskId);
+            outboundQueue.enqueue({
+              taskId: endTaskId,
+              label: "reasoning-end",
+              send: () =>
+                sendReasoningTextUpdate({
+                  config,
+                  sessionId,
+                  taskId: endTaskId,
+                  messageId: getActiveMessageId(),
+                  text: reasoningSegmentText,
+                  append: false,
+                  isReasoningFinished: true,
+                  lastChunk: true,
+                  streamingTextId,
+                }),
+            });
+          }
 
           // 思考块结束后紧跟一帧 status-update（"已完成深度思考"），
           // 每个思考块结束时都发；正文完成后不再发（终态帧文案另见
