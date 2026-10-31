@@ -6,6 +6,7 @@ import { xyConfigSchema } from "./config-schema.js";
 import { xyOutbound } from "./dispatch/outbound.js";
 import { xyOnboardingAdapter } from "./onboarding.js";
 import { filterToolsByDevice } from "./tools/device-tool-map.js";
+import { filterToolsByAppVersion } from "./tools/tool-visibility.js";
 import { getCurrentSessionContext } from "./tools/session-manager.js";
 import { logger } from "./utils/logger.js";
 
@@ -34,6 +35,7 @@ import { displayA2UICardByPathTool } from "./tools/display-a2ui-card-bypath-tool
 // import { checkPluginPrivilegeTool } from "./tools/check-plugin-privilege-tool.js";
 import { invokeTool } from "./tools/invoke.js";
 import { xiaoyiAppendReferenceTool } from "./tools/xiaoyi-append-reference.js";
+import { askUserTool } from "./tools/ask-user-tool.js";
 
 const ALL_TOOLS: any[] = [
   locationTool,
@@ -57,6 +59,7 @@ const ALL_TOOLS: any[] = [
   agentAsSkillTool,
   invokeTool,
   xiaoyiAppendReferenceTool,
+  askUserTool,
 ];
 
 /**
@@ -108,10 +111,12 @@ export const xyPlugin: ChannelPlugin = {
   agentTools: () => {
     const ctx = getCurrentSessionContext();
     const deviceFiltered = filterToolsByDevice(ALL_TOOLS, ctx?.deviceType);
+    const versionFiltered = filterToolsByAppVersion(deviceFiltered, ctx?.appVer);
     const filtered = ctx?.modelCapabilities?.supportsNativeImages
-      ? deviceFiltered.filter((tool) => tool.name !== "image_reading")
-      : deviceFiltered;
-    logger.log(`[DEVICE-FILTER] deviceType=${ctx?.deviceType ?? "(none)"}, tools: ${ALL_TOOLS.length} → ${filtered.length} (${filtered.map(t => t.name).join(", ")})`);
+      ? versionFiltered.filter((tool) => tool.name !== "image_reading")
+      : versionFiltered;
+    logger.log(`[DEVICE-FILTER] deviceType=${ctx?.deviceType ?? "(none)"}, tools: ${ALL_TOOLS.length} → ${versionFiltered.length}`);
+    logger.log(`[APP-VERSION-FILTER] appVer=${ctx?.appVer ?? "(none)"}, tools: ${versionFiltered.length} → ${filtered.length} (${filtered.map(t => t.name).join(", ")})`);
     return filtered;
   },
 
