@@ -185,6 +185,15 @@ process.on("unhandledRejection", (reason) => {
   writeLog("error", "Unhandled rejection", [reason]);
 });
 
+// ── A2A-OUT 日志开关 ──
+// 默认开启；环境变量 XY_A2A_OUT_LOG=0/false/off 时全局关闭。
+// 所有 [A2A-OUT] 日志在 writeLog 统一拦截（兜底，含未来新增调用点）；
+// 调用方也可用 isA2AOutLogEnabled() 提前判断，跳过组日志字符串的开销。
+export function isA2AOutLogEnabled(): boolean {
+  const v = (process.env.XY_A2A_OUT_LOG ?? "").trim().toLowerCase();
+  return !(v === "0" || v === "false" || v === "off");
+}
+
 // ── Core write function with optional explicit context ──
 function writeLog(level: string, message: string, args: any[], explicitSid?: string, explicitTid?: string): void {
   checkRotation();
@@ -193,12 +202,16 @@ function writeLog(level: string, message: string, args: any[], explicitSid?: str
   const timestamp = formatTimestampUTC8();
   const msg = args.length ? formatMessage(message, args) : message;
   const line = `|${level}|${timestamp}|${sessionId}|${taskId}|${msg}\n`;
-  // [A2A-OUT] 标签的日志单独路由到 A2A-OUT-YYYYMMDD.log（不进主日志）
-  const target = msg.startsWith("[A2A-OUT]") ? a2aDest : dest;
-  if (target === dest) {
-    currentFileBytes += Buffer.byteLength(line, "utf8");
+  // [A2A-OUT] 标签的日志单独路由到 A2A-OUT-YYYYMMDD.log（不进主日志；
+  // 不计入主日志的单文件大小切分，仅受 7 天保留与总量上限治理）；
+  // 开关关闭时直接丢弃
+  if (msg.startsWith("[A2A-OUT]")) {
+    if (!isA2AOutLogEnabled()) return;
+    a2aDest.write(line);
+    return;
   }
-  target.write(line);
+  currentFileBytes += Buffer.byteLength(line, "utf8");
+  dest.write(line);
 }
 
 export interface ScopedLogger {
