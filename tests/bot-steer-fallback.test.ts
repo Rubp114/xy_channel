@@ -73,6 +73,8 @@ vi.mock("../src/formatter.js", () => ({
   sendClearContextResponse: vi.fn(),
   sendTasksCancelResponse: vi.fn(),
   sendA2AResponse: mocks.sendA2AResponse,
+  sendDisplayTaskCardData: mocks.sendDisplayTaskCardData,
+  sendFileArtifacts: vi.fn(),
 }));
 
 vi.mock("../src/self-evolution-keyword.js", () => ({
