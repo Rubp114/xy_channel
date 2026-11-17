@@ -9,7 +9,7 @@ import { xyPlugin } from "../src/channel.js";
 import { resolveModelInput } from "../src/model-input.js";
 import { runWithSessionContext, type SessionContext } from "../src/tools/session-manager.js";
 
-function context(deviceType: string, modelInput: unknown): SessionContext {
+function context(deviceType: string, modelInput: unknown, appVer = "11.7.10.300"): SessionContext {
   return {
     config: {} as SessionContext["config"],
     sessionId: `model-input-${deviceType}`,
@@ -43,6 +43,15 @@ describe("request-scoped image tool visibility", () => {
       expect(names).toContain("image_reading");
     },
   );
+
+  it.each([
+    ["11.7.9.330", false], ["11.7.10.0", false], ["11.7.10.299", false],
+    ["11.7.10.300", true], ["11.7.10.301", true],
+  ])("preserves upstream version-gated tools for %s independently of image capability", async (appVer, visible) => {
+    const names = await runWithSessionContext(context("phone", ["image"], appVer), async () => toolNames());
+    expect(names.includes("ask_user")).toBe(visible);
+    expect(names).not.toContain("image_reading");
+  });
 
   it("does not mutate the static list across requests or affect calls without A2A context", async () => {
     await runWithSessionContext(context("phone", ["image"]), async () => {
