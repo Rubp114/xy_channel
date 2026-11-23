@@ -1,6 +1,6 @@
 {
   "name": "@ynhcj/xiaoyi-channel",
-  "version": "0.0.51-release20261126",
+  "version": "0.0.32-release2026060601",
   "description": "OpenClaw Xiaoyi Channel plugin - Xiaoyi A2A protocol integration",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,7 +17,6 @@
   ],
   "scripts": {
     "build": "node build.mjs build",
-    "prepack": "npm run build",
     "test": "vitest run"
   },
   "keywords": [
@@ -59,8 +58,9 @@
     }
   },
   "dependencies": {
+    "archiver": "^7.0.1",
     "node-fetch": "^3.3.2",
-    "openclaw": "2026.6.6",
+    "openclaw": ">=2026.6.6",
     "pino": "^10.3.1",
     "uuid": "^9.0.0",
     "ws": "^8.14.2"
