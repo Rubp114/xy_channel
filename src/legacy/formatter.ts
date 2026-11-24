@@ -602,8 +602,8 @@ export async function sendClearContextResponse(params: SendClearContextResponseP
     },
   };
 
-  // Send via WebSocket（clearContext 使用 sessionId 作为 taskId）
-  await sendWsFrame({ config, sessionId, taskId: sessionId, payload: jsonRpcResponse });
+  // Send via WebSocket（clearContext 使用 messageId 作为 taskId）
+  await sendWsFrame({ config, sessionId, taskId: messageId, payload: jsonRpcResponse });
   log.log(`[CLEAR_CONTEXT] Sent clearContext response`);
 }
 

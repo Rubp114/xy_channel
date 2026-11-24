@@ -1,6 +1,5 @@
 // OpenClaw → A2A format conversion
 // 纯 A2A 帧构建器：只负责组帧，最后一跳统一走 conversation/outbound-gateway。
-import * as os from "os";
 import { v4 as uuidv4 } from "uuid";
 import { sendWsFrame } from "./conversation/outbound-gateway.js";
 import { getOrCreateStreamingTextId, peekStreamingTextId, peekLastSentStreamingTextId, releaseStreamingTextId } from "./utils/streaming-text-id.js";
@@ -936,16 +935,8 @@ export async function sendClearContextResponse(params: SendClearContextResponseP
     },
   };
 
-  // debug：打印 clearContext 发出去的完整 response（与线上 msgDetail 一致：
-  // sendWsFrame 会在 payload 上附加 hostname 后序列化，信封 taskId=sessionId）
-  try {
-    log.log(`[CLEAR_CONTEXT][DEBUG] full response msgDetail=${JSON.stringify({ ...jsonRpcResponse, hostname: os.hostname() })}`);
-  } catch {
-    log.log(`[CLEAR_CONTEXT][DEBUG] full response=<unserializable>`);
-  }
-
-  // Send via WebSocket（clearContext 使用 sessionId 作为 taskId）
-  await sendWsFrame({ config, sessionId, taskId: sessionId, payload: jsonRpcResponse });
+  // Send via WebSocket（clearContext 使用 messageId 作为 taskId）
+  await sendWsFrame({ config, sessionId, taskId: messageId, payload: jsonRpcResponse });
   log.log(`[CLEAR_CONTEXT] Sent clearContext response`);
 }
 

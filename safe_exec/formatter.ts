@@ -292,7 +292,7 @@ export async function sendClearContextResponse(params) {
         msgType: "agent_response",
         agentId: config.agentId,
         sessionId,
-        taskId: sessionId,
+        taskId: messageId,
         msgDetail: JSON.stringify(jsonRpcResponse),
     };
 

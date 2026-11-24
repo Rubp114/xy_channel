@@ -233,12 +233,6 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       }
       const log = logger.withContext(sessionId, "");
       log.log(`[BOT] Clear context request`);
-      // debug：打印 clearContext 收到的完整 request（帧无 params，sessionId 在顶层）
-      try {
-        log.log(`[BOT][CLEAR-CTX-DEBUG] full request=${JSON.stringify(message)}`);
-      } catch {
-        log.log(`[BOT][CLEAR-CTX-DEBUG] full request=<unserializable>`);
-      }
       const config = resolveXYConfig(cfg);
       await sendClearContextResponse({
         config,
