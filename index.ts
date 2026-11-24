@@ -34,7 +34,12 @@ import {
   markSubagentSpawned,
   markSubagentEnded,
   deliverSubagentFinalResult,
+  resolveBySessionKey,
+  getCachedXYConfig,
 } from "./src/conversation/conversation-manager.js";
+import { resolveXYConfig } from "./src/config.js";
+import { reportSkillInvocation, reportWorkActivity } from "./src/utils/work-activity-reporter.js";
+import type { XYChannelConfig } from "./src/types.js";
 import { captureCronAssistantText, notifyCronAgentEnd } from "./src/conversation/cron-buffer.js";
 import { logger, setA2AOutLogEnabled } from "./src/utils/logger.js";
 
@@ -103,6 +108,25 @@ function registerSkillsDiagnosticHook(api: OpenClawPluginApi) {
     return event.toolName;
   }
 
+  /** 工作场景上报上下文：sessionId 优先取 ALS 会话，缺失按 sessionKey 反解；
+   *  config 取每消息缓存，兜底 resolveXYConfig(api.config)。全 try/catch，绝不外抛。 */
+  function resolveReportCtx(sessionKey: string): { sessionId?: string; config: XYChannelConfig | null } {
+    let sessionId: string | undefined;
+    try {
+      sessionId = getCurrentSessionContext()?.sessionId;
+    } catch { /* ignore */ }
+    if (!sessionId && sessionKey) {
+      try {
+        sessionId = resolveBySessionKey(sessionKey)?.sessionId;
+      } catch { /* ignore */ }
+    }
+    let config: XYChannelConfig | null = null;
+    try {
+      config = (getCachedXYConfig() as XYChannelConfig | undefined) ?? resolveXYConfig(api.config);
+    } catch { /* ignore */ }
+    return { sessionId, config };
+  }
+
   // Log skill usage on before_tool_call: read 工具技能 md（延迟/立即）、
   // device tools via TOOL_SKILL_MAP、exec/bash via skill path detection。
   api.on("before_tool_call", async (event, ctx) => {
@@ -114,10 +138,13 @@ function registerSkillsDiagnosticHook(api: OpenClawPluginApi) {
       if (classified?.kind === "skillMd") {
         // 顶层 SKILL.md：延迟打点，等待后续实际使用抑制或 turn 结束落盘
         markSkillMdRead(ctx.sessionKey ?? "", classified.skillName);
+        // 工作场景上报：读技能 md 即算调用（含顶层 SKILL.md）
+        reportSkillInvocation(classified.skillName, resolveReportCtx(ctx.sessionKey ?? ""));
       } else if (classified?.kind === "otherSkillMd") {
         // 技能内其它 md：每次 read 立即打点，并抑制同技能 SKILL.md 待打点
         writeSkillUsage(classified.skillName);
         suppressPendingSkillMdRead(ctx.sessionKey ?? "", classified.skillName);
+        reportSkillInvocation(classified.skillName, resolveReportCtx(ctx.sessionKey ?? ""));
       }
       return;
     }
@@ -126,6 +153,7 @@ function registerSkillsDiagnosticHook(api: OpenClawPluginApi) {
     const mappedSkill = TOOL_SKILL_MAP[actualToolName];
     if (mappedSkill) {
       writeSkillUsage(mappedSkill);
+      reportSkillInvocation(mappedSkill, resolveReportCtx(ctx.sessionKey ?? ""));
       return;
     }
 
@@ -138,6 +166,8 @@ function registerSkillsDiagnosticHook(api: OpenClawPluginApi) {
         writeSkillUsage(skillName);
         // 读 SKILL.md 后的实际使用：抑制同会话同技能的 SKILL.md 待打点
         suppressPendingSkillMdRead(ctx.sessionKey ?? "", skillName);
+        // 工作场景上报：运行技能路径里的脚本即算调用
+        reportSkillInvocation(skillName, resolveReportCtx(ctx.sessionKey ?? ""));
       }
     }
   });
@@ -254,6 +284,21 @@ async function captureCronAddMapping(
   console.log(`[CRONMAP] extracted jobId=${jobId}`);
 
   const sessionCtx = getCurrentSessionContext();
+
+  // 工作场景上报：定时任务创建成功（对话触发路径）。dedupKey=jobId，
+  // 每次创建各报一次；config 缺失时 reporter 内部跳过，不影响主流程。
+  try {
+    let reportConfig: XYChannelConfig | null = null;
+    try {
+      reportConfig = (getCachedXYConfig() as XYChannelConfig | undefined) ?? null;
+    } catch { /* ignore */ }
+    reportWorkActivity("work_scheduled_tasks", {
+      sessionId: sessionCtx?.sessionId,
+      config: reportConfig,
+      dedupKey: jobId,
+    });
+  } catch { /* ignore */ }
+
   const sessionId = sessionCtx?.sessionId;
   if (!sessionId) {
     console.log(`[CRONMAP] skip: no sessionId in ALS scope (ctxFound=${!!sessionCtx})`);

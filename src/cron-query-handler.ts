@@ -17,6 +17,7 @@ import { sendCommand } from "./formatter.js";
 import { resolveXYConfig } from "./config.js";
 import { configManager } from "./utils/config-manager.js";
 import { setJobPushId } from "./utils/cron-push-map.js";
+import { reportWorkActivity } from "./utils/work-activity-reporter.js";
 import { logger } from "./utils/logger.js";
 
 // ── Local run-log constants, types, and parsers (moved from cron-recovery) ───
@@ -267,6 +268,19 @@ export async function handleCronQueryEvent(context: any, cfg: any): Promise<void
           { timeoutMs: GATEWAY_TIMEOUT_MS },
           gatewayParams,
         );
+
+        // 工作场景上报：定时任务创建成功（上行事件请求路径）。dedupKey=jobId，
+        // 每次创建各报一次；失败仅记日志，不影响主流程。
+        try {
+          const newJobId = (gatewayResult as { id?: unknown })?.id;
+          reportWorkActivity("work_scheduled_tasks", {
+            sessionId: typeof sessionId === "string" ? sessionId : undefined,
+            config: cfg ? resolveXYConfig(cfg) : null,
+            dedupKey: typeof newJobId === "string" && newJobId.trim() ? newJobId.trim() : undefined,
+          });
+        } catch (err: unknown) {
+          logger.error(`[CRON-QUERY] Failed to report work activity:`, err);
+        }
 
         // 捕获 jobId↔pushId：cron-query 路径由 channel 自己建 job，
         // 此处 context 握着 sessionId，configManager 有对应设备 pushId。
