@@ -26,6 +26,7 @@ import { saveRuntimeInfo } from "../utils/runtime-manager.js";
 import { toolCallNudgeManager } from "../utils/tool-call-nudge-manager.js";
 import { tryDirectSteer } from "../conversation/steer-service.js";
 import { markAppVersion, isLegacyAppVersion } from "../utils/app-version.js";
+import { getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
 import {
   registerTask,
   completeTask,
@@ -42,6 +43,7 @@ import {
   getCurrentTaskId,
   getCurrentMessageId,
   getOrCreateSession,
+  getSession,
   clearWaitState,
 } from "../conversation/conversation-manager.js";
 import { clearPendingApproval } from "../approval-bridge.js";
@@ -66,6 +68,9 @@ export interface HandleXYMessageParams {
 }
 
 const PREVIOUS_TURN_SETTLE_TIMEOUT_MS = 70_000;
+
+/** steer 回退等待期间，第 N+1 轮 id 的 A2A command 保活间隔。 */
+const STEER_WAIT_KEEPALIVE_INTERVAL_MS = 10_000;
 
 async function waitForPreviousTurnWithTimeoutWarning(
   waitForPreviousTurn: (() => Promise<void>) | undefined,
@@ -478,6 +483,8 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     // 直接注入失败时，先等旧 dispatch 收尾，再落回普通 tasks/send 派发：
     // 活跃 run 已关闭或正在退出时，避免新旧 turn 并发争用 session 写锁。
     let steerFailReason: string | undefined;
+    /** steer 回退等待期间的保活定时器（第 N+1 轮 id 的 A2A command 心跳）。 */
+    let steerWaitKeepAliveTimer: ReturnType<typeof setInterval> | undefined;
     if (isUpdate && !requiresNewTurn && route.sessionKey) {
       const previousTaskId = getCurrentTaskId(parsed.sessionId);
       const previousMessageId = getCurrentMessageId(parsed.sessionId);
@@ -488,6 +495,18 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         source: "user",
       });
       if (steerResult.ok) {
+        // steer 生效：第 N 轮已入站未发出的内容一律不再下发 —— 出站队列里
+        // 旧 taskId 的待发帧（正文/状态卡命令/文件/引用）全部 purge；装配器
+        // 里已累积未入队的文本切段清空。此后端侧只会收到：下方补发的第 N 轮
+        // final 帧 + 注入后 run 继续产出的新消息（registerTask 后挂新 taskId，
+        // 旧 taskId 的帧已被清空，新帧不再携带第 N 轮内容）。
+        // 在途帧无法撤回；刻意不打 markTurnCanceled —— 旧 dispatcher 仍承担
+        // 注入后的输出，其 isOutputStale 以创建时 taskId 判定，取消会误杀新内容。
+        const steerSession = getSession(parsed.sessionId);
+        if (previousTaskId) {
+          steerSession?.outboundQueue.purge(previousTaskId);
+        }
+        steerSession?.assembler?.cutSegment();
         if (previousTaskId && previousMessageId) {
           // 只通知端侧关闭旧任务，不取消内部 run，避免影响 steer 后的回复。
           try {
@@ -514,6 +533,43 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       }
       steerFailReason = (steerResult as { reason: string }).reason;
       log.log(`[BOT-STEER] Direct steer failed (${steerFailReason}), waiting for previous turn before re-dispatch`);
+      // 保活：等待第 N 轮发送完成期间，以第 N+1 轮 id 周期性下发 A2A command，
+      // 防止端侧对第 N+1 条 query 判超时无响应（起始卡在入站时已下发，此处补
+      // 周期心跳）。高版本发 DisplayTaskCardData（与 manager 30s 保活卡同构），
+      // 低版本发 status-update；派发正式开始（registerTask）或被 strictFullTurn
+      // 回绝时停止。刻意不注册进任务链：registerTask 提前会让旧 dispatcher 的
+      // getActiveTaskId 解析到第 N+1 轮，第 N 轮剩余帧被误挂到新 id。
+      const sendSteerWaitKeepAlive = async (): Promise<void> => {
+        try {
+          if (isLegacyAppVersion(parsed.taskId)) {
+            await legacySendStatusUpdate({
+              config,
+              sessionId: parsed.sessionId,
+              taskId: parsed.taskId,
+              messageId: parsed.messageId,
+              text: "任务正在处理中，请稍候~",
+              state: "working",
+            });
+          } else {
+            await sendDisplayTaskCardData({
+              config,
+              sessionId: parsed.sessionId,
+              taskId: parsed.taskId,
+              messageId: parsed.messageId,
+              index: getCurrentStatusCardSeq(parsed.taskId),
+              stepName: "任务正在处理中，请稍候",
+              isFinal: false,
+            });
+          }
+        } catch (err) {
+          log.error(`[BOT-STEER] Wait keep-alive send failed:`, err);
+        }
+      };
+      void sendSteerWaitKeepAlive();
+      steerWaitKeepAliveTimer = setInterval(() => {
+        void sendSteerWaitKeepAlive();
+      }, STEER_WAIT_KEEPALIVE_INTERVAL_MS);
+      steerWaitKeepAliveTimer.unref?.();
       // 队列关闭或 run 已消失时，旧 dispatch 仍可能持有 session 写锁。
       // 等它完成收尾再开新 turn，避免并发写锁竞争和 60s 超时。
       await waitForPreviousTurnWithTimeoutWarning(params.waitForPreviousTurn, () => {
@@ -524,6 +580,7 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     if (requiresNewTurn) {
       const readiness = await waitForFullTurnAdmission(parsed.sessionId, route.sessionKey, params.waitForPreviousTurn, log);
       if (readiness !== "ready") {
+        clearInterval(steerWaitKeepAliveTimer);
         await sendAdmissionFailure(identity, readiness === "busy"
           ? "上一条任务仍在处理中，本次请求暂未执行，请稍后重试。"
           : "暂时无法确认会话状态，本次请求暂未执行，请稍后重试。");
@@ -531,6 +588,8 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       }
     }
 
+    // steer 回退等待结束：停保活心跳（第 N+1 轮任务在下方统一注册，接管后续输出）。
+    clearInterval(steerWaitKeepAliveTimer);
     // ALS only: no registerSession. The sessionContext built below is handed
     // to runWithSessionContext() inside withReplyDispatcher.run, which is the
     // single wrap point for the whole agent turn.
@@ -589,6 +648,7 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     if (requiresNewTurn || !isUpdate || (steerFailReason === "no-active-run" && !hasWaitState(parsed.sessionId))) {
       bindSessionKey(route.sessionKey, parsed.sessionId, parsed.taskId, parsed.messageId);
     }
+    if (isUpdate && steerFailReason) log.log(`[BOT-STEER] Previous turn settled, re-dispatching as a new turn`);
 
     let dispatchCfg = cfg;
     if (modelCapabilities.supportsNativeImages) {
