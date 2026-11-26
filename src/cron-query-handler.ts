@@ -275,6 +275,7 @@ export async function handleCronQueryEvent(context: any, cfg: any): Promise<void
           const newJobId = (gatewayResult as { id?: unknown })?.id;
           reportWorkActivity("work_scheduled_tasks", {
             sessionId: typeof sessionId === "string" ? sessionId : undefined,
+            taskId: typeof taskId === "string" ? taskId : undefined,
             config: cfg ? resolveXYConfig(cfg) : null,
             dedupKey: typeof newJobId === "string" && newJobId.trim() ? newJobId.trim() : undefined,
           });

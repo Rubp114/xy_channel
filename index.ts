@@ -36,6 +36,7 @@ import {
   deliverSubagentFinalResult,
   resolveBySessionKey,
   getCachedXYConfig,
+  getCurrentTaskId,
 } from "./src/conversation/conversation-manager.js";
 import { resolveXYConfig } from "./src/config.js";
 import { reportSkillInvocation, reportWorkActivity } from "./src/utils/work-activity-reporter.js";
@@ -108,23 +109,34 @@ function registerSkillsDiagnosticHook(api: OpenClawPluginApi) {
     return event.toolName;
   }
 
-  /** 工作场景上报上下文：sessionId 优先取 ALS 会话，缺失按 sessionKey 反解；
-   *  config 取每消息缓存，兜底 resolveXYConfig(api.config)。全 try/catch，绝不外抛。 */
-  function resolveReportCtx(sessionKey: string): { sessionId?: string; config: XYChannelConfig | null } {
+  /** 工作场景上报上下文：sessionId/taskId 优先取 ALS 会话，缺失按 sessionKey
+   *  反解，taskId 再兜底任务链尾部（getCurrentTaskId）；config 取每消息缓存，
+   *  兜底 resolveXYConfig(api.config)。全 try/catch，绝不外抛。 */
+  function resolveReportCtx(sessionKey: string): { sessionId?: string; taskId?: string; config: XYChannelConfig | null } {
     let sessionId: string | undefined;
+    let taskId: string | undefined;
     try {
-      sessionId = getCurrentSessionContext()?.sessionId;
+      const als = getCurrentSessionContext();
+      sessionId = als?.sessionId;
+      taskId = als?.taskId;
     } catch { /* ignore */ }
     if (!sessionId && sessionKey) {
       try {
-        sessionId = resolveBySessionKey(sessionKey)?.sessionId;
+        const binding = resolveBySessionKey(sessionKey);
+        sessionId = binding?.sessionId;
+        taskId = taskId ?? binding?.taskId;
+      } catch { /* ignore */ }
+    }
+    if (!taskId && sessionId) {
+      try {
+        taskId = getCurrentTaskId(sessionId) ?? undefined;
       } catch { /* ignore */ }
     }
     let config: XYChannelConfig | null = null;
     try {
       config = (getCachedXYConfig() as XYChannelConfig | undefined) ?? resolveXYConfig(api.config);
     } catch { /* ignore */ }
-    return { sessionId, config };
+    return { sessionId, taskId, config };
   }
 
   // Log skill usage on before_tool_call: read 工具技能 md（延迟/立即）、
@@ -294,6 +306,7 @@ async function captureCronAddMapping(
     } catch { /* ignore */ }
     reportWorkActivity("work_scheduled_tasks", {
       sessionId: sessionCtx?.sessionId,
+      taskId: sessionCtx?.taskId,
       config: reportConfig,
       dedupKey: jobId,
     });

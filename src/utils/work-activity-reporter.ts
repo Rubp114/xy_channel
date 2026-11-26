@@ -12,15 +12,15 @@
 // 读技能任意 md（含顶层 SKILL.md）或 exec/bash 运行技能路径里的脚本，均算调用。
 //
 // 请求约定：
-//   - header 对齐 cspl/push 的 HTTPS 约定：content-type、x-hag-trace-id、x-uid、
-//     x-api-key、x-request-from，另加 x-skill-id（默认空）、x-session-id；
-//     x-hag-trace-id 取当前会话 sessionId 拼毫秒时间戳（cspl buildTraceId 同款，
-//     空 sessionId 降级 uuid，超 64 截断）。
+//   - header：content-type、x-uid、x-api-key、x-request-from、x-skill-id
+//     （默认空）、x-session-id（当前会话）；x-hag-trace-id 填当前活跃会话的
+//     taskId（ALS 任务链/事件上下文取，缺失时降级 sessionId → 随机 uuid）。
 //   - body 仅一个字段：{ taskType }。
 //   - 去重：key = `${sessionId}|${taskType}|${dedupKey}` 进程内只报一次；
 //     cron 场景由调用方传 jobId 作 dedupKey（每次创建各报一次），技能场景
 //     不传（同会话同技能只报一次）。
 //   - 异步 fire-and-forget，失败仅记日志，绝不影响主流程。
+//   - [WORK-REPORT][DEBUG] 日志打印完整请求报文与响应/报错全文。
 
 import * as https from "https";
 import { randomUUID } from "crypto";
@@ -30,7 +30,6 @@ import type { XYChannelConfig } from "../types.js";
 const REPORT_URL =
   "https://lfhagmirror.hwcloudtest.cn:18449/client-work-activity/v1/task/report";
 const REQUEST_TIMEOUT_MS = 10_000;
-const MAX_TRACE_ID_LENGTH = 64;
 const REQUEST_FROM = "openclaw";
 
 export type WorkActivityTaskType =
@@ -52,20 +51,17 @@ const SKILL_TASK_TYPE_MAP: Record<string, WorkActivityTaskType> = {
 /** 进程内去重表。 */
 const reportedKeys = new Set<string>();
 
-/** trace-id：sessionId 拼毫秒时间戳；空 sessionId 降级 uuid；超 64 截断（对齐 cspl buildTraceId）。 */
-function buildTraceId(sessionId: string): string {
-  const traceId = sessionId ? `${sessionId}_${Date.now()}` : randomUUID();
-  return traceId.length > MAX_TRACE_ID_LENGTH
-    ? traceId.substring(0, MAX_TRACE_ID_LENGTH)
-    : traceId;
+interface PostJsonResult {
+  status: number;
+  body: string;
 }
 
-/** POST JSON，resolve HTTP 状态码；网络/超时错误 reject。 */
+/** POST JSON，收集响应全文，resolve { status, body }；网络/超时错误 reject。 */
 function postJson(
   url: string,
   headers: Record<string, string>,
   body: string,
-): Promise<number> {
+): Promise<PostJsonResult> {
   return new Promise((resolve, reject) => {
     const urlObj = new URL(url);
     const req = https.request(
@@ -79,8 +75,15 @@ function postJson(
         rejectUnauthorized: false, // 与 cspl upload_file 一致（测试环境自签名证书）
       },
       (res) => {
-        res.resume(); // 丢弃响应体
-        res.on("end", () => resolve(res.statusCode ?? 0));
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () =>
+          resolve({
+            status: res.statusCode ?? 0,
+            body: Buffer.concat(chunks).toString("utf-8"),
+          }),
+        );
+        res.on("error", reject);
       },
     );
     req.on("timeout", () =>
@@ -92,9 +95,21 @@ function postJson(
   });
 }
 
+/** 错误对象可读化（含 stack / cause 链）。 */
+function describeError(err: unknown): string {
+  if (err instanceof Error) {
+    const cause = (err as { cause?: unknown }).cause;
+    return `${err.name}: ${err.message}${err.stack ? `\n${err.stack}` : ""}` +
+      (cause ? `\ncaused by: ${String(cause)}` : "");
+  }
+  return String(err);
+}
+
 export interface WorkActivityReportContext {
-  /** 当前会话 A2A sessionId（进 x-session-id / x-hag-trace-id）；缺失按空串处理。 */
+  /** 当前会话 A2A sessionId（进 x-session-id）；缺失按空串处理。 */
   sessionId?: string;
+  /** 当前活跃会话的 taskId（填 x-hag-trace-id）；缺失降级 sessionId → uuid。 */
+  taskId?: string;
   /** 频道配置（取 uid/apiKey）；缺失或缺字段时跳过上报。 */
   config?: XYChannelConfig | null;
   /** 去重键后缀：cron 场景传 jobId（每次创建各报一次）；不传则同会话同场景只报一次。 */
@@ -119,7 +134,9 @@ export function reportWorkActivity(
     if (reportedKeys.has(key)) return;
     reportedKeys.add(key);
 
-    const traceId = buildTraceId(sessionId);
+    // trace-id 填当前活跃会话的 taskId（不复用 cspl 的 sessionId_时间戳 约定）；
+    // taskId 缺失时降级 sessionId，两者都没有用随机 uuid 兜底
+    const traceId = ctx.taskId || sessionId || randomUUID();
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "x-hag-trace-id": traceId,
@@ -133,13 +150,23 @@ export function reportWorkActivity(
     logger.log(
       `[WORK-REPORT] reporting taskType=${taskType}, sessionId=${sessionId || "(none)"}, traceId=${traceId}`,
     );
-    postJson(REPORT_URL, headers, body)
-      .then((status) =>
-        logger.log(`[WORK-REPORT] reported taskType=${taskType}, httpStatus=${status}`),
-      )
-      .catch((err) =>
-        logger.error(`[WORK-REPORT] report failed taskType=${taskType}:`, err),
+    // debug：完整请求报文
+    try {
+      logger.log(
+        `[WORK-REPORT][DEBUG] request url=${REPORT_URL} headers=${JSON.stringify(headers)} body=${body}`,
       );
+    } catch { /* ignore */ }
+    postJson(REPORT_URL, headers, body)
+      .then(({ status, body: respBody }) => {
+        logger.log(`[WORK-REPORT] reported taskType=${taskType}, httpStatus=${status}`);
+        // debug：完整响应报文
+        logger.log(`[WORK-REPORT][DEBUG] response status=${status} body=${respBody || "(empty)"}`);
+      })
+      .catch((err) => {
+        logger.error(`[WORK-REPORT] report failed taskType=${taskType}:`, err);
+        // debug：完整报错内容
+        logger.error(`[WORK-REPORT][DEBUG] request error=${describeError(err)}`);
+      });
   } catch (err) {
     logger.error(`[WORK-REPORT] report failed taskType=${taskType}:`, err);
   }
