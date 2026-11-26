@@ -324,43 +324,6 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     const config = resolveXYConfig(cfg);
     cacheXYConfig(config);
 
-    // 低版本链路（app_ver < 11.7.10.212）：按合并前 0730 的下发逻辑 ——
-    // 直发初始 status-update，不发 DisplayTaskCardData 起始卡。
-    // 新版本链路：下发 DisplayTaskCardData 起始卡（index=1，任务正在处理中）。
-    // 走会话出站队列而非直发，排在上一 turn 可能在途的终态帧之后（steer 场景）；
-    // 配对卡的 final 帧由 reply-dispatcher / conversation-manager 在对话轮结束时下发。
-    if (isLegacyAppVersion(parsed.taskId)) {
-      log.log(`[BOT] Sending initial status update (legacy)`);
-      void legacySendStatusUpdate({
-        config,
-        sessionId: parsed.sessionId,
-        taskId: parsed.taskId,
-        messageId: parsed.messageId,
-        text: "任务正在处理中，请稍候~",
-        state: "working",
-      }).catch((err) => {
-        log.error(`Failed to send initial status update (legacy):`, err);
-      });
-    } else {
-      const startSession = getOrCreateSession(parsed.sessionId);
-      const startTaskId = parsed.taskId;
-      const startMessageId = parsed.messageId;
-      startSession.outboundQueue.enqueue({
-        taskId: startTaskId,
-        label: "task-card-start",
-        send: () =>
-          sendDisplayTaskCardData({
-            config,
-            sessionId: parsed.sessionId,
-            taskId: startTaskId,
-            messageId: startMessageId,
-            index: 1,
-            stepName: "任务正在处理中",
-            isFinal: false,
-          }),
-      });
-    }
-
     // ✅ Resolve agent route (following feishu pattern)
     // accountId is "default" for XY (single account mode)
     // Use sessionId as peer.id to ensure all messages in the same session share context
@@ -526,13 +489,44 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         }
         registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
         log.log(`[BOT-STEER] Direct steer succeeded — message injected into active run`);
+        // 第 N+1 轮起始卡补发：steer 成功路径不经过正常派发的入站发卡点，
+        // 必须在这里显式补上 —— 出站队列刚被 purge、N+1 内容要等 run 继续才
+        // 产出，本卡入队即首帧，保证"任务正在处理中"排在 steer 后任何 A2A
+        // 文本消息之前（与正常派发 bot.ts task-card-start 同构）。
+        if (isLegacyAppVersion(parsed.taskId)) {
+          void legacySendStatusUpdate({
+            config,
+            sessionId: parsed.sessionId,
+            taskId: parsed.taskId,
+            messageId: parsed.messageId,
+            text: "任务正在处理中，请稍候~",
+            state: "working",
+          }).catch((err) => {
+            log.error(`Failed to send steer start status update (legacy):`, err);
+          });
+        } else {
+          getOrCreateSession(parsed.sessionId).outboundQueue.enqueue({
+            taskId: parsed.taskId,
+            label: "task-card-start",
+            send: () =>
+              sendDisplayTaskCardData({
+                config,
+                sessionId: parsed.sessionId,
+                taskId: parsed.taskId,
+                messageId: parsed.messageId,
+                index: 1,
+                stepName: "任务正在处理中",
+                isFinal: false,
+              }),
+          });
+        }
         // 在途调用正在流式产出（思考/正文流活跃）：置抑制窗口——窗口内第 N 轮
-        // 剩余流式内容只丢帧不记账，在途调用的首个 message_end 处解除（见
+        // 剩余流式内容只丢帧不记账，下一个 assistant message_start 处解除（见
         // utils/steer-suppression）。无在途产出（调用间隙）不置窗口，下一个
         // 调用即归属第 N+1 轮，直接放行。
         if (hasStreamActivity(parsed.sessionId)) {
           markSteerSuppression(parsed.sessionId);
-          log.log(`[BOT-STEER] Suppression window armed — in-flight stream output dropped until next message_end`);
+          log.log(`[BOT-STEER] Suppression window armed — in-flight stream output dropped until next assistant message_start`);
         }
         // Steer message taskId stays in the binding so getActiveTaskId()
         // resolves to the latest taskId for onPartialReply replies.
@@ -658,6 +652,45 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       bindSessionKey(route.sessionKey, parsed.sessionId, parsed.taskId, parsed.messageId);
     }
     if (isUpdate && steerFailReason) log.log(`[BOT-STEER] Previous turn settled, re-dispatching as a new turn`);
+    // 只有完成入站准入后才发送起始帧，避免附件下载、模型能力或 SDK 状态
+    // 校验失败时产生孤立的高版本起始卡 / 低版本 working 状态。
+    // 低版本链路（app_ver < 11.7.10.212）：按合并前 0730 的下发逻辑 ——
+    // 直发初始 status-update，不发 DisplayTaskCardData 起始卡。
+    // 新版本链路：下发 DisplayTaskCardData 起始卡（index=1，任务正在处理中）。
+    // 走会话出站队列而非直发，排在上一 turn 可能在途的终态帧之后（steer 场景）；
+    // 配对卡的 final 帧由 reply-dispatcher / conversation-manager 在对话轮结束时下发。
+    // steer 成功路径不经过此处（已在上方 registerTask 后补发起始卡并 return）。
+    if (isLegacyAppVersion(parsed.taskId)) {
+      log.log(`[BOT] Sending initial status update (legacy)`);
+      void legacySendStatusUpdate({
+        config,
+        sessionId: parsed.sessionId,
+        taskId: parsed.taskId,
+        messageId: parsed.messageId,
+        text: "任务正在处理中，请稍候~",
+        state: "working",
+      }).catch((err) => {
+        log.error(`Failed to send initial status update (legacy):`, err);
+      });
+    } else {
+      const startSession = getOrCreateSession(parsed.sessionId);
+      const startTaskId = parsed.taskId;
+      const startMessageId = parsed.messageId;
+      startSession.outboundQueue.enqueue({
+        taskId: startTaskId,
+        label: "task-card-start",
+        send: () =>
+          sendDisplayTaskCardData({
+            config,
+            sessionId: parsed.sessionId,
+            taskId: startTaskId,
+            messageId: startMessageId,
+            index: 1,
+            stepName: "任务正在处理中",
+            isFinal: false,
+          }),
+      });
+    }
 
     let dispatchCfg = cfg;
     if (modelCapabilities.supportsNativeImages) {
