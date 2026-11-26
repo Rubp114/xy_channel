@@ -1,9 +1,9 @@
 // 端侧工作场景上报（client-work-activity/v1/task/report）。
 // 需求单号：AR10004AGN【会员活动】积分任务运营活动
 //
-// 接口地址与凭证：全部取自 ~/.openclaw/.xiaoyienv（invoke 同款读取方式）——
-//   source-url + 固定路径 /client-work-activity/v1/task/report（端口后部分）；
-//   PERSONAL-UID / PERSONAL-API-KEY 作 x-uid / x-api-key。
+// 接口地址与凭证：全部取自 ~/.openclaw/.xiaoyienv（invoke 同款读取方式、
+// 同款键名）——SERVICE_URL + 固定路径 /client-work-activity/v1/task/report
+// （端口后部分）；PERSONAL-UID / PERSONAL-API-KEY 作 x-uid / x-api-key。
 //
 // 触发场景 → taskType：
 //   1. 调用 xiaoyi-ppt 技能                            → work_generate_ppt
@@ -36,14 +36,14 @@ import type { XYChannelConfig } from "../types.js";
 
 /** 环境文件（与 invoke 同一约定）：~/.openclaw/.xiaoyienv，KEY=VALUE 行、# 注释。 */
 const ENV_FILE_PATH = path.join(os.homedir(), ".openclaw", ".xiaoyienv");
-/** 上报接口路径（端口后的固定部分）；完整地址 = 环境变量 source-url + 本路径。 */
+/** 上报接口路径（端口后的固定部分）；完整地址 = 环境变量 SERVICE_URL + 本路径。 */
 const REPORT_API_PATH = "/client-work-activity/v1/task/report";
 const REQUEST_TIMEOUT_MS = 10_000;
 const REQUEST_FROM = "openclaw";
 
 /**
- * 从 .xiaoyienv 读上报所需环境配置（invoke 同款解析）：
- *   source-url        → 接口地址前缀
+ * 从 .xiaoyienv 读上报所需环境配置（invoke 同款解析、同款键名）：
+ *   SERVICE_URL       → 接口地址前缀
  *   PERSONAL-UID      → x-uid
  *   PERSONAL-API-KEY  → x-api-key
  * 任一键缺失/读失败返回 null（调用方跳过上报，不抛错）。地址前缀剥离尾部斜杠。
@@ -59,11 +59,11 @@ function readEnvConfig(): { sourceUrl: string; uid: string; apiKey: string } | n
       const eqIdx = trimmed.indexOf("=");
       if (eqIdx === -1) continue;
       const key = trimmed.substring(0, eqIdx).trim();
-      if (key === "source-url" || key === "PERSONAL-UID" || key === "PERSONAL-API-KEY") {
+      if (key === "SERVICE_URL" || key === "PERSONAL-UID" || key === "PERSONAL-API-KEY") {
         env[key] = trimmed.substring(eqIdx + 1).trim();
       }
     }
-    const sourceUrl = (env["source-url"] ?? "").replace(/\/+$/, "");
+    const sourceUrl = (env["SERVICE_URL"] ?? "").replace(/\/+$/, "");
     const uid = env["PERSONAL-UID"] ?? "";
     const apiKey = env["PERSONAL-API-KEY"] ?? "";
     if (!sourceUrl || !uid || !apiKey) return null;
@@ -165,19 +165,26 @@ export function reportWorkActivity(
 ): void {
   const sessionId = ctx.sessionId ?? "";
   try {
-    // 接口地址与凭证全部取自 .xiaoyienv（invoke 同款读取）：source-url 为
+    // 接口地址与凭证全部取自 .xiaoyienv（invoke 同款键名）：SERVICE_URL 为
     // 地址前缀，PERSONAL-UID / PERSONAL-API-KEY 为 x-uid / x-api-key。
     // 任一键缺失跳过（不记去重表，env 修复后下个触发点可正常上报）
     const envCfg = readEnvConfig();
     if (!envCfg) {
       logger.warn(
-        `[WORK-REPORT] skip taskType=${taskType}: source-url/PERSONAL-UID/PERSONAL-API-KEY not fully set in ${ENV_FILE_PATH}`,
+        `[WORK-REPORT] skip taskType=${taskType}: SERVICE_URL/PERSONAL-UID/PERSONAL-API-KEY not fully set in ${ENV_FILE_PATH}`,
       );
       return;
     }
     const reportUrl = `${envCfg.sourceUrl}${REPORT_API_PATH}`;
     const key = `${sessionId}|${taskType}|${ctx.dedupKey ?? ""}`;
-    if (reportedKeys.has(key)) return;
+    if (reportedKeys.has(key)) {
+      // 去重命中也留痕：同 taskType 多技能（deep-research/web-search）同会话
+      // 互斥、sessionId 缺失时按空串去重，都是这个分支吞掉的
+      logger.log(
+        `[WORK-REPORT] skip taskType=${taskType}: dedup hit, key=${key}`,
+      );
+      return;
+    }
     reportedKeys.add(key);
 
     // trace-id 填当前活跃会话的 taskId（不复用 cspl 的 sessionId_时间戳 约定）；
@@ -225,5 +232,9 @@ export function reportSkillInvocation(
 ): void {
   const taskType = SKILL_TASK_TYPE_MAP[skillName.toLowerCase()];
   if (!taskType) return;
+  // 命中留痕：打点有记录但上报缺失时，用于区分"未命中映射"与下游被吞
+  logger.log(
+    `[WORK-REPORT] skill matched: ${skillName} → ${taskType}, sessionId=${ctx.sessionId || "(none)"}, taskId=${ctx.taskId || "(none)"}`,
+  );
   reportWorkActivity(taskType, ctx);
 }
