@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   dispatchReplyFromConfig: vi.fn(),
   sendStatusUpdate: vi.fn(),
   sendA2AResponse: vi.fn(),
+  sendDisplayTaskCardData: vi.fn(),
   log: vi.fn(),
   warn: vi.fn(),
   error: vi.fn(),
@@ -143,6 +144,7 @@ describe("bot steer fallback sequencing", () => {
     mocks.updateModel.mockResolvedValue({});
     mocks.sendStatusUpdate.mockResolvedValue(undefined);
     mocks.sendA2AResponse.mockResolvedValue(undefined);
+    mocks.sendDisplayTaskCardData.mockResolvedValue(undefined);
     mocks.createXYReplyDispatcher.mockReturnValue({
       dispatcher: {},
       replyOptions: {},

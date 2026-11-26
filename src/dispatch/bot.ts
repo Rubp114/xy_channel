@@ -12,7 +12,7 @@ import { downloadFilesFromParts } from "../file-download.js";
 import { isImageAttachment } from "../model-input.js";
 import { loadNativeImages, NATIVE_IMAGE_MAX_BYTES, NativeImageInputError } from "../native-images.js";
 import { resolveXYConfig } from "../config.js";
-import { sendClearContextResponse, sendTasksCancelResponse, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
+import { sendStatusUpdate, sendClearContextResponse, sendTasksCancelResponse, sendA2AResponse, sendDisplayTaskCardData } from "../formatter.js";
 import {
   appendSelfEvolutionKeywordNudge,
   shouldNudgeForSelfEvolutionKeyword,

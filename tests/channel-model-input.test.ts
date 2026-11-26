@@ -17,6 +17,7 @@ function context(deviceType: string, modelInput: unknown, appVer = "11.7.10.212"
     messageId: "test-message",
     agentId: "default",
     deviceType,
+    appVer,
     modelName: "Example_Model",
     modelCapabilities: resolveModelInput(modelInput),
   };

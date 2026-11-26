@@ -138,7 +138,6 @@ function registerSkillsDiagnosticHook(api: OpenClawPluginApi) {
       writeSkillUsage(mappedSkill);
       return;
     }
-  });
 
     // 3. exec/bash command references a skill path (incl. cd into skill dir)
     if (actualToolName === "exec" || actualToolName === "bash") {
