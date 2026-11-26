@@ -13422,6 +13422,7 @@ var LOG_PREFIX = "xiaoyi-channel";
 var MAX_AGE_DAYS = 7;
 var MAX_FILE_BYTES = 10 * 1024 * 1024;
 var MAX_TOTAL_BYTES = 100 * 1024 * 1024;
+var A2A_LOG_PREFIX = "A2A-OUT";
 function formatDateUTC8(d) {
   return `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, "0")}${String(d.getUTCDate()).padStart(2, "0")}`;
 }
@@ -13444,6 +13445,9 @@ function formatTimestampUTC8() {
 function getLogFilePath(dateStr) {
   return join(LOG_DIR, `${LOG_PREFIX}-${dateStr ?? getTodayDateStr()}.log`);
 }
+function getA2ALogFilePath(dateStr) {
+  return join(LOG_DIR, `${A2A_LOG_PREFIX}-${dateStr ?? getTodayDateStr()}.log`);
+}
 try {
   mkdirSync(LOG_DIR, { recursive: true });
 } catch {
@@ -13452,9 +13456,9 @@ function cleanupOldLogs() {
   try {
     const files = readdirSync(LOG_DIR);
     const cutoffStr = getCutoffDateStr();
-    const dateRe = new RegExp(`^${LOG_PREFIX}-(\\d{8})`);
+    const dateRe = new RegExp(`^(?:${LOG_PREFIX}|${A2A_LOG_PREFIX})-(\\d{8})`);
     for (const f3 of files) {
-      if (!f3.startsWith(LOG_PREFIX) || !f3.endsWith(".log")) continue;
+      if (!(f3.startsWith(LOG_PREFIX) || f3.startsWith(A2A_LOG_PREFIX)) || !f3.endsWith(".log")) continue;
       const m2 = dateRe.exec(f3);
       if (!m2) continue;
       if (m2[1] < cutoffStr) {
@@ -13473,7 +13477,7 @@ function enforceTotalCap() {
     const activePath = getLogFilePath(currentDate);
     const files = [];
     for (const f3 of readdirSync(LOG_DIR)) {
-      if (!f3.startsWith(LOG_PREFIX) || !f3.endsWith(".log")) continue;
+      if (!(f3.startsWith(LOG_PREFIX) || f3.startsWith(A2A_LOG_PREFIX)) || !f3.endsWith(".log")) continue;
       const fp = join(LOG_DIR, f3);
       try {
         const st = statSync(fp);
@@ -13498,6 +13502,7 @@ function enforceTotalCap() {
 }
 var currentDate = getTodayDateStr();
 var dest = import_pino.default.destination({ dest: getLogFilePath(currentDate), sync: false, mkdir: true });
+var a2aDest = import_pino.default.destination({ dest: getA2ALogFilePath(currentDate), sync: false, mkdir: true });
 cleanupOldLogs();
 var cleanupTimer = setInterval(cleanupOldLogs, 6 * 60 * 60 * 1e3);
 cleanupTimer.unref?.();
@@ -13526,6 +13531,7 @@ function checkRotation() {
     currentDate = today;
     dest.reopen(getLogFilePath(today));
     currentFileBytes = 0;
+    a2aDest.reopen(getA2ALogFilePath(today));
     cleanupOldLogs();
     return;
   }
@@ -13551,6 +13557,10 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   writeLog("error", "Unhandled rejection", [reason]);
 });
+var a2aOutLogEnabled = true;
+function isA2AOutLogEnabled() {
+  return a2aOutLogEnabled;
+}
 function writeLog(level, message, args, explicitSid, explicitTid) {
   checkRotation();
   const sessionId = explicitSid !== void 0 ? explicitSid : getSessionInfo().sessionId;
@@ -13559,6 +13569,11 @@ function writeLog(level, message, args, explicitSid, explicitTid) {
   const msg = args.length ? formatMessage(message, args) : message;
   const line = `|${level}|${timestamp}|${sessionId}|${taskId}|${msg}
 `;
+  if (msg.startsWith("[A2A-OUT]")) {
+    if (!isA2AOutLogEnabled()) return;
+    a2aDest.write(line);
+    return;
+  }
   currentFileBytes += Buffer.byteLength(line, "utf8");
   dest.write(line);
 }
@@ -13659,6 +13674,22 @@ function v4(options, buf, offset) {
   return unsafeStringify(rnds);
 }
 var v4_default = v4;
+
+// src/utils/streaming-text-id.ts
+var streamingTextIds = /* @__PURE__ */ new Map();
+var lastSentStreamingTextIds = /* @__PURE__ */ new Map();
+function peekStreamingTextId(taskId) {
+  return streamingTextIds.get(taskId);
+}
+function recordSentStreamingTextId(taskId, id) {
+  lastSentStreamingTextIds.set(taskId, id);
+}
+
+// src/utils/app-version.ts
+var legacyAppVersionByTask = /* @__PURE__ */ new Map();
+function isLegacyAppVersion(taskId) {
+  return legacyAppVersionByTask.get(taskId) === true;
+}
 
 // src/conversation/outbound-gateway.ts
 import os2 from "os";
@@ -14006,7 +14037,7 @@ var XYWebSocketManager = class extends EventEmitter {
   getConnectionDiagnostics() {
     const cacheKey = `${this.config.apiKey}-${this.config.agentId}`;
     const connectionDiag = this.getConnectionDiagnostic();
-    const totalEventListeners = this.listenerCount("message") + this.listenerCount("connected") + this.listenerCount("disconnected") + this.listenerCount("error") + this.listenerCount("ready") + this.listenerCount("data-event") + this.listenerCount("gui-agent-response") + this.listenerCount("agent-as-skill-response");
+    const totalEventListeners = this.listenerCount("message") + this.listenerCount("connected") + this.listenerCount("disconnected") + this.listenerCount("error") + this.listenerCount("ready") + this.listenerCount("data-event") + this.listenerCount("ask-user-response") + this.listenerCount("gui-agent-response") + this.listenerCount("agent-as-skill-response");
     return {
       cacheKey,
       connection: connectionDiag,
@@ -14240,6 +14271,16 @@ var XYWebSocketManager = class extends EventEmitter {
     heartbeat.start();
     this.heartbeat = heartbeat;
   }
+  toAskUserResponse(item) {
+    if (item?.header?.namespace !== "AgentEvent" || item?.header?.name !== "InvokeRsp") {
+      return null;
+    }
+    const payload = item?.payload;
+    if (!payload || typeof payload.ask_user_id !== "string" || !payload.ask_user_id) {
+      return null;
+    }
+    return payload;
+  }
   toUploadExeDataEvent(item) {
     const outputs = item?.payload?.outputs ?? {};
     const payloadIntentName = typeof item?.payload?.intentName === "string" ? item.payload.intentName : "";
@@ -14388,8 +14429,11 @@ ${part.text}`
       if (Array.isArray(parsed.events)) {
         const eventSessionId = parsed.session?.sessionId || parsed.sessionId;
         for (const item of parsed.events) {
+          const askUserResponse = this.toAskUserResponse(item);
           const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, eventSessionId ?? "");
-          if (crossDeviceTaskResult) {
+          if (askUserResponse) {
+            this.emit("ask-user-response", askUserResponse);
+          } else if (crossDeviceTaskResult) {
             this.emit("cross-device-task-result", crossDeviceTaskResult);
           }
         }
@@ -14431,10 +14475,14 @@ ${part.text}`
             for (const item of events) {
               log.log(`[XY] Raw event: header=${JSON.stringify(item?.header)}, payloadKeys=${Object.keys(item?.payload ?? {}).join(",")}`);
               const dataEvent = this.toUploadExeDataEvent(item);
+              const askUserResponse = this.toAskUserResponse(item);
               const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, sessionId);
               if (dataEvent) {
                 log.log(`[XY] Emitting data-event, intentName: ${dataEvent.intentName}, status: ${dataEvent.status}, size: ${JSON.stringify(dataEvent).length} bytes`);
                 this.emit("data-event", dataEvent);
+              } else if (askUserResponse) {
+                log.log(`[XY] AgentEvent.InvokeRsp detected, emitting ask-user-response, askUserId=${askUserResponse.ask_user_id}`);
+                this.emit("ask-user-response", askUserResponse);
               } else if (crossDeviceTaskResult) {
                 this.emit("cross-device-task-result", crossDeviceTaskResult);
               } else if (item.header?.namespace === "ClawAgent" && item.header?.name === "InvokeJarvisGUIAgentResponse") {
@@ -14495,6 +14543,15 @@ ${part.text}`
                   taskId: a2aRequest2.params?.id,
                   messageId: a2aRequest2.id
                 });
+              } else if (item.header?.namespace === "AgentEvent" && item.header?.name === "AgentTopicDelete") {
+                log.log("[XY] AgentEvent.AgentTopicDelete detected, emitting agent-topic-delete-event");
+                this.emit("agent-topic-delete-event", {
+                  ...item.payload ?? {},
+                  header: item.header,
+                  sessionId,
+                  taskId: a2aRequest2.params?.id,
+                  messageId: a2aRequest2.id
+                });
               } else if (item.header?.namespace === "System" && item.header?.name === "ExecuteAgentAsSkillResponse") {
                 log.log("[XY] ExecuteAgentAsSkillResponse detected, emitting agent-as-skill-response");
                 this.emit("agent-as-skill-response", item);
@@ -14533,8 +14590,11 @@ ${part.text}`
           if (Array.isArray(parsedDetail.events)) {
             const eventSessionId = parsedDetail.session?.sessionId || inboundMsg.sessionId || parsedDetail.sessionId;
             for (const item of parsedDetail.events) {
+              const askUserResponse = this.toAskUserResponse(item);
               const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, eventSessionId ?? "");
-              if (crossDeviceTaskResult) {
+              if (askUserResponse) {
+                this.emit("ask-user-response", askUserResponse);
+              } else if (crossDeviceTaskResult) {
                 this.emit("cross-device-task-result", crossDeviceTaskResult);
               }
             }
@@ -14553,6 +14613,7 @@ ${part.text}`
               for (const item of events) {
                 log.log(`[XY] Raw event (wrapped): header=${JSON.stringify(item?.header)}, payloadKeys=${Object.keys(item?.payload ?? {}).join(",")}`);
                 const dataEvent = this.toUploadExeDataEvent(item);
+                const askUserResponse = this.toAskUserResponse(item);
                 const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(
                   item,
                   inboundMsg.sessionId || a2aRequest2.params?.sessionId
@@ -14560,6 +14621,9 @@ ${part.text}`
                 if (dataEvent) {
                   log.log(`[XY] Emitting data-event, intentName: ${dataEvent.intentName}, status: ${dataEvent.status}, size: ${JSON.stringify(dataEvent).length} bytes`);
                   this.emit("data-event", dataEvent);
+                } else if (askUserResponse) {
+                  log.log(`[XY] AgentEvent.InvokeRsp detected (wrapped), emitting ask-user-response, askUserId=${askUserResponse.ask_user_id}`);
+                  this.emit("ask-user-response", askUserResponse);
                 } else if (crossDeviceTaskResult) {
                   this.emit("cross-device-task-result", crossDeviceTaskResult);
                 } else if (item.header?.namespace === "ClawAgent" && item.header?.name === "InvokeJarvisGUIAgentResponse") {
@@ -14601,6 +14665,15 @@ ${part.text}`
                   log.log("[XY] AgentEvent.MemoryQuery detected (wrapped format), emitting memory-query-event");
                   this.emit("memory-query-event", {
                     ...item.payload ?? {},
+                    sessionId: inboundMsg.sessionId || a2aRequest2.params?.sessionId,
+                    taskId: inboundMsg.taskId || a2aRequest2.params?.id,
+                    messageId: a2aRequest2.id
+                  });
+                } else if (item.header?.namespace === "AgentEvent" && item.header?.name === "AgentTopicDelete") {
+                  log.log("[XY] AgentEvent.AgentTopicDelete detected (wrapped format), emitting agent-topic-delete-event");
+                  this.emit("agent-topic-delete-event", {
+                    ...item.payload ?? {},
+                    header: item.header,
                     sessionId: inboundMsg.sessionId || a2aRequest2.params?.sessionId,
                     taskId: inboundMsg.taskId || a2aRequest2.params?.id,
                     messageId: a2aRequest2.id
@@ -16354,17 +16427,115 @@ async function getOrCreateConvId(cronId) {
 }
 
 // src/conversation/outbound-gateway.ts
+function extractCommands(payload) {
+  const parts = payload?.result?.artifact?.parts;
+  if (!Array.isArray(parts)) return [];
+  return parts.filter((p) => p?.kind === "data" && Array.isArray(p.data?.commands)).flatMap((p) => p.data.commands);
+}
+function isMemoryFileReadCommand(command) {
+  return command?.header?.namespace === "AgentEvent" && command?.header?.name === "MemoryQuery" && command?.payload?.action === "MemoryFileRead";
+}
+function splitMixedReasoningFrames(payload) {
+  const result = payload?.result;
+  const parts = result?.artifact?.parts;
+  if (!Array.isArray(parts) || parts.length < 2) return [payload];
+  const hasReasoning = parts.some((p) => p?.kind === "reasoningText");
+  const hasText = parts.some((p) => p?.kind === "text");
+  if (!hasReasoning || !hasText) return [payload];
+  if (isA2AOutLogEnabled()) {
+    logger.warn(`[A2A-OUT] Mixed reasoningText+text frame detected, splitting into separate frames`);
+  }
+  const reasoningParts = parts.filter((p) => p?.kind === "reasoningText");
+  const otherParts = parts.filter((p) => p?.kind !== "reasoningText");
+  const reasoningFrame = {
+    ...payload,
+    result: {
+      ...result,
+      // reasoning 帧后面还跟着正文帧，不再是末帧
+      lastChunk: false,
+      final: false,
+      artifact: { ...result.artifact, parts: reasoningParts }
+    }
+  };
+  const textFrame = {
+    ...payload,
+    result: { ...result, artifact: { ...result.artifact, parts: otherParts } }
+  };
+  return [reasoningFrame, textFrame];
+}
+function previewContent(s2) {
+  if (s2.length <= 10) return s2;
+  return `${s2.slice(0, 5)}***(len=${s2.length})${s2.slice(-5)}`;
+}
+function buildLoggableMsgDetail(frame) {
+  const parts = frame?.result?.artifact?.parts;
+  let logFrame = frame;
+  if (Array.isArray(parts)) {
+    logFrame = {
+      ...frame,
+      result: {
+        ...frame.result,
+        artifact: {
+          ...frame.result.artifact,
+          parts: parts.map((p) => {
+            if (p?.kind === "text" && typeof p.text === "string") {
+              return { ...p, text: previewContent(p.text) };
+            }
+            if (p?.kind === "reasoningText" && typeof p.reasoningText === "string") {
+              return { ...p, reasoningText: previewContent(p.reasoningText) };
+            }
+            if (p?.kind === "data" && p.data?.reference !== void 0) {
+              const refJson = JSON.stringify(p.data.reference);
+              return { ...p, data: { ...p.data, reference: previewContent(refJson) } };
+            }
+            return p;
+          })
+        }
+      }
+    };
+  }
+  return JSON.stringify({ ...logFrame, hostname: os2.hostname() });
+}
 async function sendWsFrame(params) {
   const { config, sessionId, taskId, payload } = params;
   const wsManager = getXYWebSocketManager(config);
-  const outboundMessage = {
-    msgType: "agent_response",
-    agentId: config.agentId,
-    sessionId,
-    taskId,
-    msgDetail: JSON.stringify({ ...payload, hostname: os2.hostname() })
-  };
-  await wsManager.sendMessage(sessionId, outboundMessage);
+  const log = logger.withContext(sessionId, taskId);
+  for (const frame of splitMixedReasoningFrames(payload)) {
+    const outboundMessage = {
+      msgType: "agent_response",
+      agentId: config.agentId,
+      sessionId,
+      taskId,
+      msgDetail: JSON.stringify({ ...frame, hostname: os2.hostname() })
+    };
+    if (isA2AOutLogEnabled()) {
+      log.log(
+        `[A2A-OUT] msgType=${outboundMessage.msgType}, agentId=${outboundMessage.agentId}, sessionId=${sessionId}, taskId=${taskId}, size=${outboundMessage.msgDetail.length}`
+      );
+      const commands = extractCommands(frame);
+      const memoryFileReadCommands = commands.filter(isMemoryFileReadCommand);
+      if (memoryFileReadCommands.length > 0) {
+        for (const command of memoryFileReadCommands) {
+          const ans = command.payload?.ans;
+          const contentBytes = Number.isSafeInteger(ans?.contentBytes) ? ans.contentBytes : "none";
+          const errorCode = typeof ans?.errorCode === "string" ? ans.errorCode : "none";
+          log.log(
+            `[A2A-OUT] command action=MemoryFileRead, ok=${ans?.ok === true}, contentBytes=${contentBytes}, errorCode=${errorCode}`
+          );
+        }
+      } else {
+        log.log(`[A2A-OUT] msgDetail=${buildLoggableMsgDetail(frame)}`);
+        if (commands.length > 0) {
+          log.log(`[A2A-OUT] commands=${JSON.stringify(commands)}`);
+        }
+      }
+    }
+    await wsManager.sendMessage(sessionId, outboundMessage);
+    const result = frame?.result;
+    if (result?.kind === "artifact-update" && typeof result.streamingTextId === "string") {
+      recordSentStreamingTextId(taskId, result.streamingTextId);
+    }
+  }
 }
 function generateSyncInteractionId() {
   return `00${Date.now()}_${randomUUID2().replace(/-/g, "")}`;
@@ -17044,11 +17215,14 @@ async function sendStatusUpdate(params) {
       }
     ]
   });
+  const currentStreamingTextId = params.streamingTextId ?? peekStreamingTextId(taskId);
   const statusUpdate = {
     taskId,
     kind: "status-update",
+    isNew: !isLegacyAppVersion(taskId),
     final: false,
     // Status updates should not end the stream
+    ...currentStreamingTextId ? { streamingTextId: currentStreamingTextId } : {},
     status: {
       message: statusMessage,
       state
@@ -17060,6 +17234,9 @@ async function sendStatusUpdate(params) {
     result: statusUpdate
   };
   log.log(`[A2A_STATUS] Sending status-update, text="${redactedText}"`);
+  if (params.logFullFrame) {
+    log.log(`[A2A_STATUS] full frame=${JSON.stringify(jsonRpcResponse)}`);
+  }
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
 }
 
@@ -17087,7 +17264,7 @@ function getCurrentTaskId(sessionId) {
 function getCurrentMessageId(sessionId) {
   return getCurrentTask(sessionId)?.messageId ?? null;
 }
-var STATUS_HEARTBEAT_INTERVAL_MS = 30 * 1e3;
+var STATUS_KEEPALIVE_INTERVAL_MS = 30 * 1e3;
 var WAIT_TTL_MS = 30 * 60 * 1e3;
 
 // src/tools/session-manager.ts

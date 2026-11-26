@@ -310,8 +310,8 @@ var require_req = __commonJS({
       if (req.originalUrl) {
         _req.url = req.originalUrl;
       } else {
-        const path22 = req.path;
-        _req.url = typeof path22 === "string" ? path22 : req.url ? req.url.path || req.url : void 0;
+        const path23 = req.path;
+        _req.url = typeof path23 === "string" ? path23 : req.url ? req.url.path || req.url : void 0;
       }
       if (req.query) {
         _req.query = req.query;
@@ -481,14 +481,14 @@ var require_redact = __commonJS({
       }
       return obj;
     }
-    function parsePath(path22) {
+    function parsePath(path23) {
       const parts = [];
       let current = "";
       let inBrackets = false;
       let inQuotes = false;
       let quoteChar = "";
-      for (let i2 = 0; i2 < path22.length; i2++) {
-        const char = path22[i2];
+      for (let i2 = 0; i2 < path23.length; i2++) {
+        const char = path23[i2];
         if (!inBrackets && char === ".") {
           if (current) {
             parts.push(current);
@@ -619,10 +619,10 @@ var require_redact = __commonJS({
       return current;
     }
     function redactPaths(obj, paths, censor, remove = false) {
-      for (const path22 of paths) {
-        const parts = parsePath(path22);
+      for (const path23 of paths) {
+        const parts = parsePath(path23);
         if (parts.includes("*")) {
-          redactWildcardPath(obj, parts, censor, path22, remove);
+          redactWildcardPath(obj, parts, censor, path23, remove);
         } else {
           if (remove) {
             removeKey(obj, parts);
@@ -707,8 +707,8 @@ var require_redact = __commonJS({
           }
         } else {
           if (afterWildcard.includes("*")) {
-            const wrappedCensor = typeof censor === "function" ? (value, path22) => {
-              const fullPath = [...pathArray.slice(0, pathLength), ...path22];
+            const wrappedCensor = typeof censor === "function" ? (value, path23) => {
+              const fullPath = [...pathArray.slice(0, pathLength), ...path23];
               return censor(value, fullPath);
             } : censor;
             redactWildcardPath(current, afterWildcard, wrappedCensor, originalPath, remove);
@@ -743,8 +743,8 @@ var require_redact = __commonJS({
         return null;
       }
       const pathStructure = /* @__PURE__ */ new Map();
-      for (const path22 of pathsToClone) {
-        const parts = parsePath(path22);
+      for (const path23 of pathsToClone) {
+        const parts = parsePath(path23);
         let current = pathStructure;
         for (let i2 = 0; i2 < parts.length; i2++) {
           const part = parts[i2];
@@ -796,24 +796,24 @@ var require_redact = __commonJS({
       }
       return cloneSelectively(obj, pathStructure);
     }
-    function validatePath(path22) {
-      if (typeof path22 !== "string") {
+    function validatePath(path23) {
+      if (typeof path23 !== "string") {
         throw new Error("Paths must be (non-empty) strings");
       }
-      if (path22 === "") {
+      if (path23 === "") {
         throw new Error("Invalid redaction path ()");
       }
-      if (path22.includes("..")) {
-        throw new Error(`Invalid redaction path (${path22})`);
+      if (path23.includes("..")) {
+        throw new Error(`Invalid redaction path (${path23})`);
       }
-      if (path22.includes(",")) {
-        throw new Error(`Invalid redaction path (${path22})`);
+      if (path23.includes(",")) {
+        throw new Error(`Invalid redaction path (${path23})`);
       }
       let bracketCount = 0;
       let inQuotes = false;
       let quoteChar = "";
-      for (let i2 = 0; i2 < path22.length; i2++) {
-        const char = path22[i2];
+      for (let i2 = 0; i2 < path23.length; i2++) {
+        const char = path23[i2];
         if ((char === '"' || char === "'") && bracketCount > 0) {
           if (!inQuotes) {
             inQuotes = true;
@@ -827,20 +827,20 @@ var require_redact = __commonJS({
         } else if (char === "]" && !inQuotes) {
           bracketCount--;
           if (bracketCount < 0) {
-            throw new Error(`Invalid redaction path (${path22})`);
+            throw new Error(`Invalid redaction path (${path23})`);
           }
         }
       }
       if (bracketCount !== 0) {
-        throw new Error(`Invalid redaction path (${path22})`);
+        throw new Error(`Invalid redaction path (${path23})`);
       }
     }
     function validatePaths(paths) {
       if (!Array.isArray(paths)) {
         throw new TypeError("paths must be an array");
       }
-      for (const path22 of paths) {
-        validatePath(path22);
+      for (const path23 of paths) {
+        validatePath(path23);
       }
     }
     function slowRedact(options = {}) {
@@ -1010,8 +1010,8 @@ var require_redaction = __commonJS({
         if (shape[k] === null) {
           o[k] = (value) => topCensor(value, [k]);
         } else {
-          const wrappedCensor = typeof censor === "function" ? (value, path22) => {
-            return censor(value, [k, ...path22]);
+          const wrappedCensor = typeof censor === "function" ? (value, path23) => {
+            return censor(value, [k, ...path23]);
           } : censor;
           o[k] = Redact({
             paths: shape[k],
@@ -1229,10 +1229,10 @@ var require_atomic_sleep = __commonJS({
 var require_sonic_boom = __commonJS({
   "node_modules/sonic-boom/index.js"(exports, module) {
     "use strict";
-    var fs28 = __require("fs");
+    var fs29 = __require("fs");
     var EventEmitter2 = __require("events");
     var inherits = __require("util").inherits;
-    var path22 = __require("path");
+    var path23 = __require("path");
     var sleep4 = require_atomic_sleep();
     var assert = __require("assert");
     var BUSY_WRITE_TIMEOUT = 100;
@@ -1286,28 +1286,28 @@ var require_sonic_boom = __commonJS({
       const mode = sonic.mode;
       if (sonic.sync) {
         try {
-          if (sonic.mkdir) fs28.mkdirSync(path22.dirname(file), { recursive: true });
-          const fd = fs28.openSync(file, flags, mode);
+          if (sonic.mkdir) fs29.mkdirSync(path23.dirname(file), { recursive: true });
+          const fd = fs29.openSync(file, flags, mode);
           fileOpened(null, fd);
         } catch (err) {
           fileOpened(err);
           throw err;
         }
       } else if (sonic.mkdir) {
-        fs28.mkdir(path22.dirname(file), { recursive: true }, (err) => {
+        fs29.mkdir(path23.dirname(file), { recursive: true }, (err) => {
           if (err) return fileOpened(err);
-          fs28.open(file, flags, mode, fileOpened);
+          fs29.open(file, flags, mode, fileOpened);
         });
       } else {
-        fs28.open(file, flags, mode, fileOpened);
+        fs29.open(file, flags, mode, fileOpened);
       }
     }
     function SonicBoom(opts) {
       if (!(this instanceof SonicBoom)) {
         return new SonicBoom(opts);
       }
-      let { fd, dest: dest3, minLength, maxLength, maxWrite, periodicFlush, sync, append = true, mkdir, retryEAGAIN, fsync, contentMode, mode } = opts || {};
-      fd = fd || dest3;
+      let { fd, dest: dest4, minLength, maxLength, maxWrite, periodicFlush, sync, append = true, mkdir, retryEAGAIN, fsync, contentMode, mode } = opts || {};
+      fd = fd || dest4;
       this._len = 0;
       this.fd = -1;
       this._bufs = [];
@@ -1340,8 +1340,8 @@ var require_sonic_boom = __commonJS({
         this.flush = flushBuffer;
         this.flushSync = flushBufferSync;
         this._actualWrite = actualWriteBuffer;
-        fsWriteSync = () => fs28.writeSync(this.fd, this._writingBuf);
-        fsWrite = () => fs28.write(this.fd, this._writingBuf, this.release);
+        fsWriteSync = () => fs29.writeSync(this.fd, this._writingBuf);
+        fsWrite = () => fs29.write(this.fd, this._writingBuf, this.release);
       } else if (contentMode === void 0 || contentMode === kContentModeUtf8) {
         this._writingBuf = "";
         this.write = write;
@@ -1350,15 +1350,15 @@ var require_sonic_boom = __commonJS({
         this._actualWrite = actualWrite;
         fsWriteSync = () => {
           if (Buffer.isBuffer(this._writingBuf)) {
-            return fs28.writeSync(this.fd, this._writingBuf);
+            return fs29.writeSync(this.fd, this._writingBuf);
           }
-          return fs28.writeSync(this.fd, this._writingBuf, "utf8");
+          return fs29.writeSync(this.fd, this._writingBuf, "utf8");
         };
         fsWrite = () => {
           if (Buffer.isBuffer(this._writingBuf)) {
-            return fs28.write(this.fd, this._writingBuf, this.release);
+            return fs29.write(this.fd, this._writingBuf, this.release);
           }
-          return fs28.write(this.fd, this._writingBuf, "utf8", this.release);
+          return fs29.write(this.fd, this._writingBuf, "utf8", this.release);
         };
       } else {
         throw new Error(`SonicBoom supports "${kContentModeUtf8}" and "${kContentModeBuffer}", but passed ${contentMode}`);
@@ -1415,7 +1415,7 @@ var require_sonic_boom = __commonJS({
           }
         }
         if (this._fsync) {
-          fs28.fsyncSync(this.fd);
+          fs29.fsyncSync(this.fd);
         }
         const len = this._len;
         if (this._reopening) {
@@ -1529,7 +1529,7 @@ var require_sonic_boom = __commonJS({
       const onDrain = () => {
         if (!this._fsync) {
           try {
-            fs28.fsync(this.fd, (err) => {
+            fs29.fsync(this.fd, (err) => {
               this._flushPending = false;
               cb(err);
             });
@@ -1631,7 +1631,7 @@ var require_sonic_boom = __commonJS({
       const fd = this.fd;
       this.once("ready", () => {
         if (fd !== this.fd) {
-          fs28.close(fd, (err) => {
+          fs29.close(fd, (err) => {
             if (err) {
               return this.emit("error", err);
             }
@@ -1680,7 +1680,7 @@ var require_sonic_boom = __commonJS({
           buf = this._bufs[0];
         }
         try {
-          const n = Buffer.isBuffer(buf) ? fs28.writeSync(this.fd, buf) : fs28.writeSync(this.fd, buf, "utf8");
+          const n = Buffer.isBuffer(buf) ? fs29.writeSync(this.fd, buf) : fs29.writeSync(this.fd, buf, "utf8");
           const releasedBufObj = releaseWritingBuf(buf, this._len, n);
           buf = releasedBufObj.writingBuf;
           this._len = releasedBufObj.len;
@@ -1696,7 +1696,7 @@ var require_sonic_boom = __commonJS({
         }
       }
       try {
-        fs28.fsyncSync(this.fd);
+        fs29.fsyncSync(this.fd);
       } catch {
       }
     }
@@ -1717,7 +1717,7 @@ var require_sonic_boom = __commonJS({
           buf = mergeBuf(this._bufs[0], this._lens[0]);
         }
         try {
-          const n = fs28.writeSync(this.fd, buf);
+          const n = fs29.writeSync(this.fd, buf);
           buf = buf.subarray(n);
           this._len = Math.max(this._len - n, 0);
           if (buf.length <= 0) {
@@ -1745,13 +1745,13 @@ var require_sonic_boom = __commonJS({
       this._writingBuf = this._writingBuf.length ? this._writingBuf : this._bufs.shift() || "";
       if (this.sync) {
         try {
-          const written = Buffer.isBuffer(this._writingBuf) ? fs28.writeSync(this.fd, this._writingBuf) : fs28.writeSync(this.fd, this._writingBuf, "utf8");
+          const written = Buffer.isBuffer(this._writingBuf) ? fs29.writeSync(this.fd, this._writingBuf) : fs29.writeSync(this.fd, this._writingBuf, "utf8");
           release(null, written);
         } catch (err) {
           release(err);
         }
       } else {
-        fs28.write(this.fd, this._writingBuf, release);
+        fs29.write(this.fd, this._writingBuf, release);
       }
     }
     function actualWriteBuffer() {
@@ -1760,7 +1760,7 @@ var require_sonic_boom = __commonJS({
       this._writingBuf = this._writingBuf.length ? this._writingBuf : mergeBuf(this._bufs.shift(), this._lens.shift());
       if (this.sync) {
         try {
-          const written = fs28.writeSync(this.fd, this._writingBuf);
+          const written = fs29.writeSync(this.fd, this._writingBuf);
           release(null, written);
         } catch (err) {
           release(err);
@@ -1769,7 +1769,7 @@ var require_sonic_boom = __commonJS({
         if (kCopyBuffer) {
           this._writingBuf = Buffer.from(this._writingBuf);
         }
-        fs28.write(this.fd, this._writingBuf, release);
+        fs29.write(this.fd, this._writingBuf, release);
       }
     }
     function actualClose(sonic) {
@@ -1785,12 +1785,12 @@ var require_sonic_boom = __commonJS({
       sonic._lens = [];
       assert(typeof sonic.fd === "number", `sonic.fd must be a number, got ${typeof sonic.fd}`);
       try {
-        fs28.fsync(sonic.fd, closeWrapped);
+        fs29.fsync(sonic.fd, closeWrapped);
       } catch {
       }
       function closeWrapped() {
         if (sonic.fd !== 1 && sonic.fd !== 2) {
-          fs28.close(sonic.fd, done);
+          fs29.close(sonic.fd, done);
         } else {
           done();
         }
@@ -2059,7 +2059,7 @@ var require_thread_stream = __commonJS({
     var { version } = require_package();
     var { EventEmitter: EventEmitter2 } = __require("events");
     var { Worker } = __require("worker_threads");
-    var { join: join7 } = __require("path");
+    var { join: join8 } = __require("path");
     var { pathToFileURL } = __require("url");
     var { wait } = require_wait();
     var {
@@ -2111,7 +2111,7 @@ var require_thread_stream = __commonJS({
     function createWorker(stream, opts) {
       const { filename, workerData } = opts;
       const bundlerOverrides = "__bundlerPathsOverrides" in globalThis ? globalThis.__bundlerPathsOverrides : {};
-      const toExecute = bundlerOverrides["thread-stream-worker"] || join7(__dirname, "lib", "worker.js");
+      const toExecute = bundlerOverrides["thread-stream-worker"] || join8(__dirname, "lib", "worker.js");
       const worker = new Worker(toExecute, {
         ...opts.workerOpts,
         name: opts.workerOpts?.name || "thread-stream",
@@ -2624,7 +2624,7 @@ var require_transport = __commonJS({
     var { createRequire: createRequire2 } = __require("module");
     var { existsSync: existsSync7 } = __require("node:fs");
     var getCallers = require_caller();
-    var { join: join7, isAbsolute: isAbsolute2, sep: sep2 } = __require("node:path");
+    var { join: join8, isAbsolute: isAbsolute2, sep: sep2 } = __require("node:path");
     var { fileURLToPath: fileURLToPath2 } = __require("node:url");
     var sleep4 = require_atomic_sleep();
     var onExit = require_on_exit_leak_free();
@@ -2689,15 +2689,15 @@ var require_transport = __commonJS({
       if (!unquoted) {
         return false;
       }
-      let path22 = unquoted;
-      if (path22.startsWith("file://")) {
+      let path23 = unquoted;
+      if (path23.startsWith("file://")) {
         try {
-          path22 = fileURLToPath2(path22);
+          path23 = fileURLToPath2(path23);
         } catch {
           return false;
         }
       }
-      return isAbsolute2(path22) && !existsSync7(path22);
+      return isAbsolute2(path23) && !existsSync7(path23);
     }
     function stripQuotes(value) {
       const first = value[0];
@@ -2779,18 +2779,18 @@ var require_transport = __commonJS({
         throw new Error("only one of target or targets can be specified");
       }
       if (targets) {
-        target = bundlerOverrides["pino-worker"] || join7(__dirname, "worker.js");
-        options.targets = targets.filter((dest3) => dest3.target).map((dest3) => {
+        target = bundlerOverrides["pino-worker"] || join8(__dirname, "worker.js");
+        options.targets = targets.filter((dest4) => dest4.target).map((dest4) => {
           return {
-            ...dest3,
-            target: fixTarget(dest3.target)
+            ...dest4,
+            target: fixTarget(dest4.target)
           };
         });
-        options.pipelines = targets.filter((dest3) => dest3.pipeline).map((dest3) => {
-          return dest3.pipeline.map((t2) => {
+        options.pipelines = targets.filter((dest4) => dest4.pipeline).map((dest4) => {
+          return dest4.pipeline.map((t2) => {
             return {
               ...t2,
-              level: dest3.level,
+              level: dest4.level,
               // duplicate the pipeline `level` property defined in the upper level
               target: fixTarget(t2.target)
             };
@@ -2800,11 +2800,11 @@ var require_transport = __commonJS({
         const pipelinesHaveLevel = options.pipelines.some((p) => p.some((t2) => t2.level != null));
         usesMultistream = options.targets.length + options.pipelines.length > 1 || targetsHaveLevel || pipelinesHaveLevel;
       } else if (pipeline2) {
-        target = bundlerOverrides["pino-worker"] || join7(__dirname, "worker.js");
-        options.pipelines = [pipeline2.map((dest3) => {
+        target = bundlerOverrides["pino-worker"] || join8(__dirname, "worker.js");
+        options.pipelines = [pipeline2.map((dest4) => {
           return {
-            ...dest3,
-            target: fixTarget(dest3.target)
+            ...dest4,
+            target: fixTarget(dest4.target)
           };
         })];
       }
@@ -2827,7 +2827,7 @@ var require_transport = __commonJS({
           return origin;
         }
         if (origin === "pino/file") {
-          return join7(__dirname, "..", "file.js");
+          return join8(__dirname, "..", "file.js");
         }
         let fixTarget2;
         for (const filePath of callers) {
@@ -3807,7 +3807,7 @@ var require_safe_stable_stringify = __commonJS({
               return circularValue;
             }
             let res = "";
-            let join7 = ",";
+            let join8 = ",";
             const originalIndentation = indentation;
             if (Array.isArray(value)) {
               if (value.length === 0) {
@@ -3821,7 +3821,7 @@ var require_safe_stable_stringify = __commonJS({
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join7 = `,
+                join8 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -3829,13 +3829,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join7;
+                res += join8;
               }
               const tmp = stringifyFnReplacer(String(i2), value, stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join7}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join8}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -3856,7 +3856,7 @@ ${originalIndentation}`;
             let separator = "";
             if (spacer !== "") {
               indentation += spacer;
-              join7 = `,
+              join8 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -3870,13 +3870,13 @@ ${indentation}`;
               const tmp = stringifyFnReplacer(key2, value, stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join7;
+                separator = join8;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...":${whitespace}"${getItemCount(removedKeys)} not stringified"`;
-              separator = join7;
+              separator = join8;
             }
             if (spacer !== "" && separator.length > 1) {
               res = `
@@ -3917,7 +3917,7 @@ ${originalIndentation}`;
             }
             const originalIndentation = indentation;
             let res = "";
-            let join7 = ",";
+            let join8 = ",";
             if (Array.isArray(value)) {
               if (value.length === 0) {
                 return "[]";
@@ -3930,7 +3930,7 @@ ${originalIndentation}`;
                 indentation += spacer;
                 res += `
 ${indentation}`;
-                join7 = `,
+                join8 = `,
 ${indentation}`;
               }
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
@@ -3938,13 +3938,13 @@ ${indentation}`;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
                 res += tmp2 !== void 0 ? tmp2 : "null";
-                res += join7;
+                res += join8;
               }
               const tmp = stringifyArrayReplacer(String(i2), value[i2], stack, replacer, spacer, indentation);
               res += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res += `${join7}"... ${getItemCount(removedKeys)} not stringified"`;
+                res += `${join8}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               if (spacer !== "") {
                 res += `
@@ -3957,7 +3957,7 @@ ${originalIndentation}`;
             let whitespace = "";
             if (spacer !== "") {
               indentation += spacer;
-              join7 = `,
+              join8 = `,
 ${indentation}`;
               whitespace = " ";
             }
@@ -3966,7 +3966,7 @@ ${indentation}`;
               const tmp = stringifyArrayReplacer(key2, value[key2], stack, replacer, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}:${whitespace}${tmp}`;
-                separator = join7;
+                separator = join8;
               }
             }
             if (spacer !== "" && separator.length > 1) {
@@ -4024,20 +4024,20 @@ ${originalIndentation}`;
               indentation += spacer;
               let res2 = `
 ${indentation}`;
-              const join8 = `,
+              const join9 = `,
 ${indentation}`;
               const maximumValuesToStringify = Math.min(value.length, maximumBreadth);
               let i2 = 0;
               for (; i2 < maximumValuesToStringify - 1; i2++) {
                 const tmp2 = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
                 res2 += tmp2 !== void 0 ? tmp2 : "null";
-                res2 += join8;
+                res2 += join9;
               }
               const tmp = stringifyIndent(String(i2), value[i2], stack, spacer, indentation);
               res2 += tmp !== void 0 ? tmp : "null";
               if (value.length - 1 > maximumBreadth) {
                 const removedKeys = value.length - maximumBreadth - 1;
-                res2 += `${join8}"... ${getItemCount(removedKeys)} not stringified"`;
+                res2 += `${join9}"... ${getItemCount(removedKeys)} not stringified"`;
               }
               res2 += `
 ${originalIndentation}`;
@@ -4053,16 +4053,16 @@ ${originalIndentation}`;
               return '"[Object]"';
             }
             indentation += spacer;
-            const join7 = `,
+            const join8 = `,
 ${indentation}`;
             let res = "";
             let separator = "";
             let maximumPropertiesToStringify = Math.min(keyLength, maximumBreadth);
             if (isTypedArrayWithEntries(value)) {
-              res += stringifyTypedArray(value, join7, maximumBreadth);
+              res += stringifyTypedArray(value, join8, maximumBreadth);
               keys = keys.slice(value.length);
               maximumPropertiesToStringify -= value.length;
-              separator = join7;
+              separator = join8;
             }
             if (deterministic) {
               keys = sort(keys, comparator);
@@ -4073,13 +4073,13 @@ ${indentation}`;
               const tmp = stringifyIndent(key2, value[key2], stack, spacer, indentation);
               if (tmp !== void 0) {
                 res += `${separator}${strEscape(key2)}: ${tmp}`;
-                separator = join7;
+                separator = join8;
               }
             }
             if (keyLength > maximumBreadth) {
               const removedKeys = keyLength - maximumBreadth;
               res += `${separator}"...": "${getItemCount(removedKeys)} not stringified"`;
-              separator = join7;
+              separator = join8;
             }
             if (separator !== "") {
               res = `
@@ -4266,18 +4266,18 @@ var require_multistream = __commonJS({
       streamsArray = null;
       return res;
       function write(data) {
-        let dest3;
+        let dest4;
         const level = typeof this.lastLevel === "string" ? (this.streamLevels || streamLevels)[this.lastLevel] : this.lastLevel;
         const { streams } = this;
         let recordedLevel = 0;
         let stream;
         for (let i2 = initLoopVar(streams.length, opts.dedupe); checkLoopVar(i2, streams.length, opts.dedupe); i2 = adjustLoopVar(i2, opts.dedupe)) {
-          dest3 = streams[i2];
-          if (dest3.level <= level) {
-            if (recordedLevel !== 0 && recordedLevel !== dest3.level) {
+          dest4 = streams[i2];
+          if (dest4.level <= level) {
+            if (recordedLevel !== 0 && recordedLevel !== dest4.level) {
               break;
             }
-            stream = dest3.stream;
+            stream = dest4.stream;
             if (stream[metadata]) {
               const { lastTime, lastMsg, lastObj, lastLogger } = this;
               stream.lastLevel = level;
@@ -4288,7 +4288,7 @@ var require_multistream = __commonJS({
             }
             stream.write(data);
             if (opts.dedupe) {
-              recordedLevel = dest3.level;
+              recordedLevel = dest4.level;
             }
           } else if (!opts.dedupe) {
             break;
@@ -4309,23 +4309,23 @@ var require_multistream = __commonJS({
           }
         }
       }
-      function add(dest3) {
-        if (!dest3) {
+      function add(dest4) {
+        if (!dest4) {
           return this;
         }
-        const isStream = typeof dest3.write === "function" || dest3.stream;
-        const stream_ = dest3.write ? dest3 : dest3.stream;
+        const isStream = typeof dest4.write === "function" || dest4.stream;
+        const stream_ = dest4.write ? dest4 : dest4.stream;
         if (!isStream) {
           throw Error("stream object needs to implement either StreamEntry or DestinationStream interface");
         }
         const { streams, streamLevels: streamLevels2 } = this;
         let level;
-        if (typeof dest3.levelVal === "number") {
-          level = dest3.levelVal;
-        } else if (typeof dest3.level === "string") {
-          level = streamLevels2[dest3.level];
-        } else if (typeof dest3.level === "number") {
-          level = dest3.level;
+        if (typeof dest4.levelVal === "number") {
+          level = dest4.levelVal;
+        } else if (typeof dest4.level === "string") {
+          level = streamLevels2[dest4.level];
+        } else if (typeof dest4.level === "number") {
+          level = dest4.level;
         } else {
           level = DEFAULT_INFO_LEVEL;
         }
@@ -4485,7 +4485,7 @@ var require_pino = __commonJS({
     };
     var normalize = createArgsNormalizer(defaultOptions);
     var serializers = Object.assign(/* @__PURE__ */ Object.create(null), stdSerializers);
-    function pino3(...args) {
+    function pino4(...args) {
       const instance = {};
       const { opts, stream } = normalize(instance, caller(), ...args);
       if (opts.level && typeof opts.level === "string" && DEFAULT_LEVELS[opts.level.toLowerCase()] !== void 0) opts.level = opts.level.toLowerCase();
@@ -4607,13 +4607,13 @@ var require_pino = __commonJS({
       instance[setLevelSym](level);
       return instance;
     }
-    module.exports = pino3;
-    module.exports.destination = (dest3 = process.stdout.fd) => {
-      if (typeof dest3 === "object") {
-        dest3.dest = normalizeDestFileDescriptor(dest3.dest || process.stdout.fd);
-        return buildSafeSonicBoom(dest3);
+    module.exports = pino4;
+    module.exports.destination = (dest4 = process.stdout.fd) => {
+      if (typeof dest4 === "object") {
+        dest4.dest = normalizeDestFileDescriptor(dest4.dest || process.stdout.fd);
+        return buildSafeSonicBoom(dest4);
       } else {
-        return buildSafeSonicBoom({ dest: normalizeDestFileDescriptor(dest3), minLength: 0 });
+        return buildSafeSonicBoom({ dest: normalizeDestFileDescriptor(dest4), minLength: 0 });
       }
     };
     module.exports.transport = require_transport();
@@ -4623,8 +4623,8 @@ var require_pino = __commonJS({
     module.exports.stdTimeFunctions = Object.assign({}, time);
     module.exports.symbols = symbols;
     module.exports.version = version;
-    module.exports.default = pino3;
-    module.exports.pino = pino3;
+    module.exports.default = pino4;
+    module.exports.pino = pino4;
   }
 });
 
@@ -4653,13 +4653,16 @@ function formatTimestampUTC8() {
 function getLogFilePath(dateStr) {
   return join(LOG_DIR, `${LOG_PREFIX}-${dateStr ?? getTodayDateStr()}.log`);
 }
+function getA2ALogFilePath(dateStr) {
+  return join(LOG_DIR, `${A2A_LOG_PREFIX}-${dateStr ?? getTodayDateStr()}.log`);
+}
 function cleanupOldLogs() {
   try {
     const files = readdirSync(LOG_DIR);
     const cutoffStr = getCutoffDateStr();
-    const dateRe = new RegExp(`^${LOG_PREFIX}-(\\d{8})`);
+    const dateRe = new RegExp(`^(?:${LOG_PREFIX}|${A2A_LOG_PREFIX})-(\\d{8})`);
     for (const f3 of files) {
-      if (!f3.startsWith(LOG_PREFIX) || !f3.endsWith(".log")) continue;
+      if (!(f3.startsWith(LOG_PREFIX) || f3.startsWith(A2A_LOG_PREFIX)) || !f3.endsWith(".log")) continue;
       const m2 = dateRe.exec(f3);
       if (!m2) continue;
       if (m2[1] < cutoffStr) {
@@ -4678,7 +4681,7 @@ function enforceTotalCap() {
     const activePath = getLogFilePath(currentDate);
     const files = [];
     for (const f3 of readdirSync(LOG_DIR)) {
-      if (!f3.startsWith(LOG_PREFIX) || !f3.endsWith(".log")) continue;
+      if (!(f3.startsWith(LOG_PREFIX) || f3.startsWith(A2A_LOG_PREFIX)) || !f3.endsWith(".log")) continue;
       const fp = join(LOG_DIR, f3);
       try {
         const st = statSync(fp);
@@ -4721,6 +4724,7 @@ function checkRotation() {
     currentDate = today;
     dest.reopen(getLogFilePath(today));
     currentFileBytes = 0;
+    a2aDest.reopen(getA2ALogFilePath(today));
     cleanupOldLogs();
     return;
   }
@@ -4740,6 +4744,12 @@ function getSessionInfo() {
   }
   return { sessionId: "", taskId: "" };
 }
+function setA2AOutLogEnabled(v) {
+  a2aOutLogEnabled = v;
+}
+function isA2AOutLogEnabled() {
+  return a2aOutLogEnabled;
+}
 function writeLog(level, message, args, explicitSid, explicitTid) {
   checkRotation();
   const sessionId = explicitSid !== void 0 ? explicitSid : getSessionInfo().sessionId;
@@ -4748,6 +4758,11 @@ function writeLog(level, message, args, explicitSid, explicitTid) {
   const msg = args.length ? formatMessage(message, args) : message;
   const line = `|${level}|${timestamp}|${sessionId}|${taskId}|${msg}
 `;
+  if (msg.startsWith("[A2A-OUT]")) {
+    if (!isA2AOutLogEnabled()) return;
+    a2aDest.write(line);
+    return;
+  }
   currentFileBytes += Buffer.byteLength(line, "utf8");
   dest.write(line);
 }
@@ -4767,7 +4782,7 @@ ${a.stack ?? ""}`;
   }).join(" ");
   return `${message} ${suffix}`;
 }
-var import_pino, LOG_DIR, LOG_PREFIX, MAX_AGE_DAYS, MAX_FILE_BYTES, MAX_TOTAL_BYTES, currentDate, dest, cleanupTimer, currentFileBytes, logger;
+var import_pino, LOG_DIR, LOG_PREFIX, MAX_AGE_DAYS, MAX_FILE_BYTES, MAX_TOTAL_BYTES, A2A_LOG_PREFIX, currentDate, dest, a2aDest, cleanupTimer, currentFileBytes, a2aOutLogEnabled, logger;
 var init_logger = __esm({
   "src/utils/logger.ts"() {
     import_pino = __toESM(require_pino(), 1);
@@ -4776,12 +4791,14 @@ var init_logger = __esm({
     MAX_AGE_DAYS = 7;
     MAX_FILE_BYTES = 10 * 1024 * 1024;
     MAX_TOTAL_BYTES = 100 * 1024 * 1024;
+    A2A_LOG_PREFIX = "A2A-OUT";
     try {
       mkdirSync(LOG_DIR, { recursive: true });
     } catch {
     }
     currentDate = getTodayDateStr();
     dest = import_pino.default.destination({ dest: getLogFilePath(currentDate), sync: false, mkdir: true });
+    a2aDest = import_pino.default.destination({ dest: getA2ALogFilePath(currentDate), sync: false, mkdir: true });
     cleanupOldLogs();
     cleanupTimer = setInterval(cleanupOldLogs, 6 * 60 * 60 * 1e3);
     cleanupTimer.unref?.();
@@ -4796,6 +4813,7 @@ var init_logger = __esm({
     process.on("unhandledRejection", (reason) => {
       writeLog("error", "Unhandled rejection", [reason]);
     });
+    a2aOutLogEnabled = true;
     logger = {
       log(message, ...args) {
         writeLog("info", message, args);
@@ -4904,6 +4922,248 @@ var init_v4 = __esm({
 var init_esm_node = __esm({
   "node_modules/uuid/dist/esm-node/index.js"() {
     init_v4();
+  }
+});
+
+// src/utils/streaming-text-id.ts
+function getOrCreateStreamingTextId(taskId) {
+  let id = streamingTextIds.get(taskId);
+  if (!id) {
+    id = v4_default();
+    streamingTextIds.set(taskId, id);
+  }
+  return id;
+}
+function peekStreamingTextId(taskId) {
+  return streamingTextIds.get(taskId);
+}
+function releaseStreamingTextId(taskId) {
+  streamingTextIds.delete(taskId);
+}
+function rotateStreamingTextId(taskId) {
+  const id = v4_default();
+  streamingTextIds.set(taskId, id);
+  return id;
+}
+function recordSentStreamingTextId(taskId, id) {
+  lastSentStreamingTextIds.set(taskId, id);
+}
+function peekLastSentStreamingTextId(taskId) {
+  return lastSentStreamingTextIds.get(taskId);
+}
+function releaseLastSentStreamingTextId(taskId) {
+  lastSentStreamingTextIds.delete(taskId);
+}
+var streamingTextIds, lastSentStreamingTextIds;
+var init_streaming_text_id = __esm({
+  "src/utils/streaming-text-id.ts"() {
+    init_esm_node();
+    streamingTextIds = /* @__PURE__ */ new Map();
+    lastSentStreamingTextIds = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/utils/status-card-seq.ts
+function nextStatusCardSeq(taskId) {
+  const next = (statusCardSeqByTask.get(taskId) ?? 0) + 1;
+  statusCardSeqByTask.set(taskId, next);
+  freshSegmentSlotByTask.set(taskId, false);
+  return next;
+}
+function advanceStatusCardSeqForSegment(taskId) {
+  const next = getCurrentStatusCardSeq(taskId) + 1;
+  statusCardSeqByTask.set(taskId, next);
+  freshSegmentSlotByTask.set(taskId, true);
+  return next;
+}
+function claimStatusCardSeqForBodyRound(taskId) {
+  if (freshSegmentSlotByTask.get(taskId) === true) {
+    freshSegmentSlotByTask.set(taskId, false);
+    return getCurrentStatusCardSeq(taskId);
+  }
+  return nextStatusCardSeq(taskId);
+}
+function getCurrentStatusCardSeq(taskId) {
+  return statusCardSeqByTask.get(taskId) ?? 1;
+}
+function releaseStatusCardSeq(taskId) {
+  statusCardSeqByTask.delete(taskId);
+  freshSegmentSlotByTask.delete(taskId);
+}
+var statusCardSeqByTask, freshSegmentSlotByTask;
+var init_status_card_seq = __esm({
+  "src/utils/status-card-seq.ts"() {
+    statusCardSeqByTask = /* @__PURE__ */ new Map();
+    freshSegmentSlotByTask = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/utils/body-round-cards.ts
+function getOrCreateState(taskId) {
+  let state2 = stateByTask.get(taskId);
+  if (!state2) {
+    state2 = { reasoningSlots: [] };
+    stateByTask.set(taskId, state2);
+  }
+  return state2;
+}
+function markReasoningBlockClosed(taskId, taskUniqIndexId) {
+  const state2 = getOrCreateState(taskId);
+  const value = String(taskUniqIndexId);
+  if (!state2.reasoningSlots.includes(value)) {
+    state2.reasoningSlots.push(value);
+  }
+}
+function peekClosedReasoningSlots(taskId) {
+  return [...stateByTask.get(taskId)?.reasoningSlots ?? []];
+}
+function openBodyRound(taskId, cardIndex) {
+  getOrCreateState(taskId).openRoundCardIndex = cardIndex;
+}
+function takeOpenBodyRoundCardIndex(taskId) {
+  const state2 = stateByTask.get(taskId);
+  const index = state2?.openRoundCardIndex;
+  if (state2) {
+    state2.openRoundCardIndex = void 0;
+  }
+  return index;
+}
+function releaseBodyRoundCards(taskId) {
+  stateByTask.delete(taskId);
+}
+function noteReasoningBlockClosedForToolCarry(taskId, taskUniqIndexId) {
+  const state2 = getOrCreateState(taskId);
+  state2.carrySlot = String(taskUniqIndexId);
+  state2.carryCloseSent = false;
+  state2.carryArmed = false;
+}
+function noteReasoningCloseFrameSentForToolCarry(taskId) {
+  const state2 = stateByTask.get(taskId);
+  if (state2?.carrySlot !== void 0) {
+    state2.carryCloseSent = true;
+  }
+}
+function noteReasoningMessageSentForToolCarry(taskId) {
+  const state2 = stateByTask.get(taskId);
+  if (state2?.carrySlot !== void 0 && state2.carryCloseSent === true) {
+    state2.carryArmed = true;
+  }
+}
+function takeToolCardThinkIndex(taskId) {
+  const state2 = stateByTask.get(taskId);
+  if (!state2 || state2.carrySlot === void 0 || state2.carryArmed !== true) {
+    return void 0;
+  }
+  const slot = state2.carrySlot;
+  state2.carrySlot = void 0;
+  state2.carryCloseSent = false;
+  state2.carryArmed = false;
+  return [slot];
+}
+var stateByTask;
+var init_body_round_cards = __esm({
+  "src/utils/body-round-cards.ts"() {
+    stateByTask = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/utils/app-version.ts
+function isBelowLegacyAppVersion(appVer) {
+  const parts = appVer.split(".").map((s2) => Number.parseInt(s2, 10));
+  for (let i2 = 0; i2 < LEGACY_APP_VERSION.length; i2++) {
+    const v = parts[i2];
+    const n = v === void 0 || Number.isNaN(v) ? 0 : v;
+    if (n < LEGACY_APP_VERSION[i2]) return true;
+    if (n > LEGACY_APP_VERSION[i2]) return false;
+  }
+  return false;
+}
+function markAppVersion(taskId, appVer) {
+  if (!appVer) return;
+  legacyAppVersionByTask.set(taskId, isBelowLegacyAppVersion(appVer));
+}
+function isLegacyAppVersion(taskId) {
+  return legacyAppVersionByTask.get(taskId) === true;
+}
+function releaseAppVersion(taskId) {
+  legacyAppVersionByTask.delete(taskId);
+}
+var LEGACY_APP_VERSION, legacyAppVersionByTask;
+var init_app_version = __esm({
+  "src/utils/app-version.ts"() {
+    LEGACY_APP_VERSION = [11, 7, 10, 212];
+    legacyAppVersionByTask = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/utils/body-text-state.ts
+function markBodyTextSent(taskId) {
+  bodyTextSentByTask.set(taskId, true);
+}
+function isBodyTextSent(taskId) {
+  return bodyTextSentByTask.get(taskId) === true;
+}
+function clearBodyTextState(taskId) {
+  bodyTextSentByTask.delete(taskId);
+}
+var bodyTextSentByTask;
+var init_body_text_state = __esm({
+  "src/utils/body-text-state.ts"() {
+    bodyTextSentByTask = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/utils/reasoning-segment.ts
+function noteReasoningSnapshot(taskId, fullText) {
+  let state2 = reasoningSegmentByTask.get(taskId);
+  if (!state2) {
+    state2 = { lastFull: "", cutBase: "", lastSegment: "", open: false };
+    reasoningSegmentByTask.set(taskId, state2);
+  }
+  state2.lastFull = fullText;
+  let segment;
+  if (fullText.startsWith(state2.cutBase)) {
+    segment = fullText.slice(state2.cutBase.length);
+  } else {
+    state2.cutBase = "";
+    segment = fullText;
+  }
+  if (segment.length > 0) {
+    state2.lastSegment = segment;
+    if (!state2.open) {
+      state2.seq = getCurrentStatusCardSeq(taskId);
+    }
+    state2.open = true;
+  }
+  return segment;
+}
+function peekReasoningSegmentSeq(taskId) {
+  return reasoningSegmentByTask.get(taskId)?.seq ?? getCurrentStatusCardSeq(taskId);
+}
+function peekReasoningSegmentText(taskId) {
+  return reasoningSegmentByTask.get(taskId)?.lastSegment ?? "";
+}
+function isReasoningSegmentOpen(taskId) {
+  return reasoningSegmentByTask.get(taskId)?.open ?? false;
+}
+function closeReasoningSegment(taskId) {
+  const state2 = reasoningSegmentByTask.get(taskId);
+  if (state2) state2.open = false;
+}
+function cutReasoningSegment(taskId) {
+  const state2 = reasoningSegmentByTask.get(taskId);
+  if (!state2 || state2.lastFull.length === 0) return;
+  state2.cutBase = state2.lastFull;
+  state2.lastSegment = "";
+}
+function releaseReasoningSegment(taskId) {
+  reasoningSegmentByTask.delete(taskId);
+}
+var reasoningSegmentByTask;
+var init_reasoning_segment = __esm({
+  "src/utils/reasoning-segment.ts"() {
+    init_status_card_seq();
+    reasoningSegmentByTask = /* @__PURE__ */ new Map();
   }
 });
 
@@ -7003,9 +7263,9 @@ var require_extension = __commonJS({
   "node_modules/ws/lib/extension.js"(exports, module) {
     "use strict";
     var { tokenChars } = require_validation();
-    function push(dest3, name, elem) {
-      if (dest3[name] === void 0) dest3[name] = [elem];
-      else dest3[name].push(elem);
+    function push(dest4, name, elem) {
+      if (dest4[name] === void 0) dest4[name] = [elem];
+      else dest4[name].push(elem);
     }
     function parse(header) {
       const offers = /* @__PURE__ */ Object.create(null);
@@ -8998,7 +9258,7 @@ var init_websocket = __esm({
       getConnectionDiagnostics() {
         const cacheKey = `${this.config.apiKey}-${this.config.agentId}`;
         const connectionDiag = this.getConnectionDiagnostic();
-        const totalEventListeners = this.listenerCount("message") + this.listenerCount("connected") + this.listenerCount("disconnected") + this.listenerCount("error") + this.listenerCount("ready") + this.listenerCount("data-event") + this.listenerCount("gui-agent-response") + this.listenerCount("agent-as-skill-response");
+        const totalEventListeners = this.listenerCount("message") + this.listenerCount("connected") + this.listenerCount("disconnected") + this.listenerCount("error") + this.listenerCount("ready") + this.listenerCount("data-event") + this.listenerCount("ask-user-response") + this.listenerCount("gui-agent-response") + this.listenerCount("agent-as-skill-response");
         return {
           cacheKey,
           connection: connectionDiag,
@@ -9232,6 +9492,16 @@ var init_websocket = __esm({
         heartbeat.start();
         this.heartbeat = heartbeat;
       }
+      toAskUserResponse(item) {
+        if (item?.header?.namespace !== "AgentEvent" || item?.header?.name !== "InvokeRsp") {
+          return null;
+        }
+        const payload = item?.payload;
+        if (!payload || typeof payload.ask_user_id !== "string" || !payload.ask_user_id) {
+          return null;
+        }
+        return payload;
+      }
       toUploadExeDataEvent(item) {
         const outputs = item?.payload?.outputs ?? {};
         const payloadIntentName = typeof item?.payload?.intentName === "string" ? item.payload.intentName : "";
@@ -9380,8 +9650,11 @@ ${part.text}`
           if (Array.isArray(parsed.events)) {
             const eventSessionId = parsed.session?.sessionId || parsed.sessionId;
             for (const item of parsed.events) {
+              const askUserResponse = this.toAskUserResponse(item);
               const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, eventSessionId ?? "");
-              if (crossDeviceTaskResult) {
+              if (askUserResponse) {
+                this.emit("ask-user-response", askUserResponse);
+              } else if (crossDeviceTaskResult) {
                 this.emit("cross-device-task-result", crossDeviceTaskResult);
               }
             }
@@ -9423,10 +9696,14 @@ ${part.text}`
                 for (const item of events) {
                   log.log(`[XY] Raw event: header=${JSON.stringify(item?.header)}, payloadKeys=${Object.keys(item?.payload ?? {}).join(",")}`);
                   const dataEvent = this.toUploadExeDataEvent(item);
+                  const askUserResponse = this.toAskUserResponse(item);
                   const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, sessionId);
                   if (dataEvent) {
                     log.log(`[XY] Emitting data-event, intentName: ${dataEvent.intentName}, status: ${dataEvent.status}, size: ${JSON.stringify(dataEvent).length} bytes`);
                     this.emit("data-event", dataEvent);
+                  } else if (askUserResponse) {
+                    log.log(`[XY] AgentEvent.InvokeRsp detected, emitting ask-user-response, askUserId=${askUserResponse.ask_user_id}`);
+                    this.emit("ask-user-response", askUserResponse);
                   } else if (crossDeviceTaskResult) {
                     this.emit("cross-device-task-result", crossDeviceTaskResult);
                   } else if (item.header?.namespace === "ClawAgent" && item.header?.name === "InvokeJarvisGUIAgentResponse") {
@@ -9487,6 +9764,15 @@ ${part.text}`
                       taskId: a2aRequest2.params?.id,
                       messageId: a2aRequest2.id
                     });
+                  } else if (item.header?.namespace === "AgentEvent" && item.header?.name === "AgentTopicDelete") {
+                    log.log("[XY] AgentEvent.AgentTopicDelete detected, emitting agent-topic-delete-event");
+                    this.emit("agent-topic-delete-event", {
+                      ...item.payload ?? {},
+                      header: item.header,
+                      sessionId,
+                      taskId: a2aRequest2.params?.id,
+                      messageId: a2aRequest2.id
+                    });
                   } else if (item.header?.namespace === "System" && item.header?.name === "ExecuteAgentAsSkillResponse") {
                     log.log("[XY] ExecuteAgentAsSkillResponse detected, emitting agent-as-skill-response");
                     this.emit("agent-as-skill-response", item);
@@ -9525,8 +9811,11 @@ ${part.text}`
               if (Array.isArray(parsedDetail.events)) {
                 const eventSessionId = parsedDetail.session?.sessionId || inboundMsg.sessionId || parsedDetail.sessionId;
                 for (const item of parsedDetail.events) {
+                  const askUserResponse = this.toAskUserResponse(item);
                   const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, eventSessionId ?? "");
-                  if (crossDeviceTaskResult) {
+                  if (askUserResponse) {
+                    this.emit("ask-user-response", askUserResponse);
+                  } else if (crossDeviceTaskResult) {
                     this.emit("cross-device-task-result", crossDeviceTaskResult);
                   }
                 }
@@ -9545,6 +9834,7 @@ ${part.text}`
                   for (const item of events) {
                     log.log(`[XY] Raw event (wrapped): header=${JSON.stringify(item?.header)}, payloadKeys=${Object.keys(item?.payload ?? {}).join(",")}`);
                     const dataEvent = this.toUploadExeDataEvent(item);
+                    const askUserResponse = this.toAskUserResponse(item);
                     const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(
                       item,
                       inboundMsg.sessionId || a2aRequest2.params?.sessionId
@@ -9552,6 +9842,9 @@ ${part.text}`
                     if (dataEvent) {
                       log.log(`[XY] Emitting data-event, intentName: ${dataEvent.intentName}, status: ${dataEvent.status}, size: ${JSON.stringify(dataEvent).length} bytes`);
                       this.emit("data-event", dataEvent);
+                    } else if (askUserResponse) {
+                      log.log(`[XY] AgentEvent.InvokeRsp detected (wrapped), emitting ask-user-response, askUserId=${askUserResponse.ask_user_id}`);
+                      this.emit("ask-user-response", askUserResponse);
                     } else if (crossDeviceTaskResult) {
                       this.emit("cross-device-task-result", crossDeviceTaskResult);
                     } else if (item.header?.namespace === "ClawAgent" && item.header?.name === "InvokeJarvisGUIAgentResponse") {
@@ -9593,6 +9886,15 @@ ${part.text}`
                       log.log("[XY] AgentEvent.MemoryQuery detected (wrapped format), emitting memory-query-event");
                       this.emit("memory-query-event", {
                         ...item.payload ?? {},
+                        sessionId: inboundMsg.sessionId || a2aRequest2.params?.sessionId,
+                        taskId: inboundMsg.taskId || a2aRequest2.params?.id,
+                        messageId: a2aRequest2.id
+                      });
+                    } else if (item.header?.namespace === "AgentEvent" && item.header?.name === "AgentTopicDelete") {
+                      log.log("[XY] AgentEvent.AgentTopicDelete detected (wrapped format), emitting agent-topic-delete-event");
+                      this.emit("agent-topic-delete-event", {
+                        ...item.payload ?? {},
+                        header: item.header,
                         sessionId: inboundMsg.sessionId || a2aRequest2.params?.sessionId,
                         taskId: inboundMsg.taskId || a2aRequest2.params?.id,
                         messageId: a2aRequest2.id
@@ -10387,8 +10689,8 @@ var require_ponyfill_es2018 = __commonJS({
       function CreateArrayFromList(elements) {
         return elements.slice();
       }
-      function CopyDataBlockBytes(dest3, destOffset, src, srcOffset, n) {
-        new Uint8Array(dest3).set(new Uint8Array(src, srcOffset, n), destOffset);
+      function CopyDataBlockBytes(dest4, destOffset, src, srcOffset, n) {
+        new Uint8Array(dest4).set(new Uint8Array(src, srcOffset, n), destOffset);
       }
       let TransferArrayBuffer = (O) => {
         if (typeof O.transfer === "function") {
@@ -12407,9 +12709,9 @@ var require_ponyfill_es2018 = __commonJS({
         return ctor;
       }
       const DOMException2 = getFromGlobal() || createPolyfill();
-      function ReadableStreamPipeTo(source, dest3, preventClose, preventAbort, preventCancel, signal) {
+      function ReadableStreamPipeTo(source, dest4, preventClose, preventAbort, preventCancel, signal) {
         const reader = AcquireReadableStreamDefaultReader(source);
-        const writer = AcquireWritableStreamDefaultWriter(dest3);
+        const writer = AcquireWritableStreamDefaultWriter(dest4);
         source._disturbed = true;
         let shuttingDown = false;
         let currentWrite = promiseResolvedWith(void 0);
@@ -12421,8 +12723,8 @@ var require_ponyfill_es2018 = __commonJS({
               const actions = [];
               if (!preventAbort) {
                 actions.push(() => {
-                  if (dest3._state === "writable") {
-                    return WritableStreamAbort(dest3, error);
+                  if (dest4._state === "writable") {
+                    return WritableStreamAbort(dest4, error);
                   }
                   return promiseResolvedWith(void 0);
                 });
@@ -12474,13 +12776,13 @@ var require_ponyfill_es2018 = __commonJS({
           }
           isOrBecomesErrored(source, reader._closedPromise, (storedError) => {
             if (!preventAbort) {
-              shutdownWithAction(() => WritableStreamAbort(dest3, storedError), true, storedError);
+              shutdownWithAction(() => WritableStreamAbort(dest4, storedError), true, storedError);
             } else {
               shutdown(true, storedError);
             }
             return null;
           });
-          isOrBecomesErrored(dest3, writer._closedPromise, (storedError) => {
+          isOrBecomesErrored(dest4, writer._closedPromise, (storedError) => {
             if (!preventCancel) {
               shutdownWithAction(() => ReadableStreamCancel(source, storedError), true, storedError);
             } else {
@@ -12496,7 +12798,7 @@ var require_ponyfill_es2018 = __commonJS({
             }
             return null;
           });
-          if (WritableStreamCloseQueuedOrInFlight(dest3) || dest3._state === "closed") {
+          if (WritableStreamCloseQueuedOrInFlight(dest4) || dest4._state === "closed") {
             const destClosed = new TypeError("the destination writable stream closed before all data could be piped to it");
             if (!preventCancel) {
               shutdownWithAction(() => ReadableStreamCancel(source, destClosed), true, destClosed);
@@ -12528,7 +12830,7 @@ var require_ponyfill_es2018 = __commonJS({
               return;
             }
             shuttingDown = true;
-            if (dest3._state === "writable" && !WritableStreamCloseQueuedOrInFlight(dest3)) {
+            if (dest4._state === "writable" && !WritableStreamCloseQueuedOrInFlight(dest4)) {
               uponFulfillment(waitForWritesToFinish(), doTheRest);
             } else {
               doTheRest();
@@ -12543,7 +12845,7 @@ var require_ponyfill_es2018 = __commonJS({
               return;
             }
             shuttingDown = true;
-            if (dest3._state === "writable" && !WritableStreamCloseQueuedOrInFlight(dest3)) {
+            if (dest4._state === "writable" && !WritableStreamCloseQueuedOrInFlight(dest4)) {
               uponFulfillment(waitForWritesToFinish(), () => finalize(isError, error));
             } else {
               finalize(isError, error);
@@ -14545,13 +14847,13 @@ var init_is = __esm({
     };
     isDomainOrSubdomain = (destination, original) => {
       const orig = new URL(original).hostname;
-      const dest3 = new URL(destination).hostname;
-      return orig === dest3 || orig.endsWith(`.${dest3}`);
+      const dest4 = new URL(destination).hostname;
+      return orig === dest4 || orig.endsWith(`.${dest4}`);
     };
     isSameProtocol = (destination, original) => {
       const orig = new URL(original).protocol;
-      const dest3 = new URL(destination).protocol;
-      return orig === dest3;
+      const dest4 = new URL(destination).protocol;
+      return orig === dest4;
     };
   }
 });
@@ -15193,11 +15495,11 @@ var init_body = __esm({
       }
       return null;
     };
-    writeToStream = async (dest3, { body }) => {
+    writeToStream = async (dest4, { body }) => {
       if (body === null) {
-        dest3.end();
+        dest4.end();
       } else {
-        await pipeline(body, dest3);
+        await pipeline(body, dest4);
       }
     };
   }
@@ -16619,17 +16921,115 @@ var init_cron_conv_map = __esm({
 // src/conversation/outbound-gateway.ts
 import os2 from "os";
 import { randomUUID as randomUUID2 } from "crypto";
+function extractCommands(payload) {
+  const parts = payload?.result?.artifact?.parts;
+  if (!Array.isArray(parts)) return [];
+  return parts.filter((p) => p?.kind === "data" && Array.isArray(p.data?.commands)).flatMap((p) => p.data.commands);
+}
+function isMemoryFileReadCommand(command) {
+  return command?.header?.namespace === "AgentEvent" && command?.header?.name === "MemoryQuery" && command?.payload?.action === "MemoryFileRead";
+}
+function splitMixedReasoningFrames(payload) {
+  const result = payload?.result;
+  const parts = result?.artifact?.parts;
+  if (!Array.isArray(parts) || parts.length < 2) return [payload];
+  const hasReasoning = parts.some((p) => p?.kind === "reasoningText");
+  const hasText = parts.some((p) => p?.kind === "text");
+  if (!hasReasoning || !hasText) return [payload];
+  if (isA2AOutLogEnabled()) {
+    logger.warn(`[A2A-OUT] Mixed reasoningText+text frame detected, splitting into separate frames`);
+  }
+  const reasoningParts = parts.filter((p) => p?.kind === "reasoningText");
+  const otherParts = parts.filter((p) => p?.kind !== "reasoningText");
+  const reasoningFrame = {
+    ...payload,
+    result: {
+      ...result,
+      // reasoning 帧后面还跟着正文帧，不再是末帧
+      lastChunk: false,
+      final: false,
+      artifact: { ...result.artifact, parts: reasoningParts }
+    }
+  };
+  const textFrame = {
+    ...payload,
+    result: { ...result, artifact: { ...result.artifact, parts: otherParts } }
+  };
+  return [reasoningFrame, textFrame];
+}
+function previewContent(s2) {
+  if (s2.length <= 10) return s2;
+  return `${s2.slice(0, 5)}***(len=${s2.length})${s2.slice(-5)}`;
+}
+function buildLoggableMsgDetail(frame) {
+  const parts = frame?.result?.artifact?.parts;
+  let logFrame = frame;
+  if (Array.isArray(parts)) {
+    logFrame = {
+      ...frame,
+      result: {
+        ...frame.result,
+        artifact: {
+          ...frame.result.artifact,
+          parts: parts.map((p) => {
+            if (p?.kind === "text" && typeof p.text === "string") {
+              return { ...p, text: previewContent(p.text) };
+            }
+            if (p?.kind === "reasoningText" && typeof p.reasoningText === "string") {
+              return { ...p, reasoningText: previewContent(p.reasoningText) };
+            }
+            if (p?.kind === "data" && p.data?.reference !== void 0) {
+              const refJson = JSON.stringify(p.data.reference);
+              return { ...p, data: { ...p.data, reference: previewContent(refJson) } };
+            }
+            return p;
+          })
+        }
+      }
+    };
+  }
+  return JSON.stringify({ ...logFrame, hostname: os2.hostname() });
+}
 async function sendWsFrame(params) {
   const { config, sessionId, taskId, payload } = params;
   const wsManager = getXYWebSocketManager(config);
-  const outboundMessage = {
-    msgType: "agent_response",
-    agentId: config.agentId,
-    sessionId,
-    taskId,
-    msgDetail: JSON.stringify({ ...payload, hostname: os2.hostname() })
-  };
-  await wsManager.sendMessage(sessionId, outboundMessage);
+  const log = logger.withContext(sessionId, taskId);
+  for (const frame of splitMixedReasoningFrames(payload)) {
+    const outboundMessage = {
+      msgType: "agent_response",
+      agentId: config.agentId,
+      sessionId,
+      taskId,
+      msgDetail: JSON.stringify({ ...frame, hostname: os2.hostname() })
+    };
+    if (isA2AOutLogEnabled()) {
+      log.log(
+        `[A2A-OUT] msgType=${outboundMessage.msgType}, agentId=${outboundMessage.agentId}, sessionId=${sessionId}, taskId=${taskId}, size=${outboundMessage.msgDetail.length}`
+      );
+      const commands = extractCommands(frame);
+      const memoryFileReadCommands = commands.filter(isMemoryFileReadCommand);
+      if (memoryFileReadCommands.length > 0) {
+        for (const command of memoryFileReadCommands) {
+          const ans = command.payload?.ans;
+          const contentBytes = Number.isSafeInteger(ans?.contentBytes) ? ans.contentBytes : "none";
+          const errorCode = typeof ans?.errorCode === "string" ? ans.errorCode : "none";
+          log.log(
+            `[A2A-OUT] command action=MemoryFileRead, ok=${ans?.ok === true}, contentBytes=${contentBytes}, errorCode=${errorCode}`
+          );
+        }
+      } else {
+        log.log(`[A2A-OUT] msgDetail=${buildLoggableMsgDetail(frame)}`);
+        if (commands.length > 0) {
+          log.log(`[A2A-OUT] commands=${JSON.stringify(commands)}`);
+        }
+      }
+    }
+    await wsManager.sendMessage(sessionId, outboundMessage);
+    const result = frame?.result;
+    if (result?.kind === "artifact-update" && typeof result.streamingTextId === "string") {
+      recordSentStreamingTextId(taskId, result.streamingTextId);
+    }
+  }
 }
 function generateSyncInteractionId() {
   return `00${Date.now()}_${randomUUID2().replace(/-/g, "")}`;
@@ -16675,7 +17075,28 @@ var init_outbound_gateway = __esm({
     init_push();
     init_pushid_manager();
     init_cron_conv_map();
+    init_streaming_text_id();
     init_logger();
+  }
+});
+
+// src/utils/reasoning-state.ts
+function markReasoningFinished(taskId) {
+  reasoningFinishedTaskIds.add(taskId);
+}
+function markReasoningStreaming(taskId) {
+  reasoningFinishedTaskIds.delete(taskId);
+}
+function isReasoningFinished(taskId) {
+  return reasoningFinishedTaskIds.has(taskId);
+}
+function releaseReasoningState(taskId) {
+  reasoningFinishedTaskIds.delete(taskId);
+}
+var reasoningFinishedTaskIds;
+var init_reasoning_state = __esm({
+  "src/utils/reasoning-state.ts"() {
+    reasoningFinishedTaskIds = /* @__PURE__ */ new Set();
   }
 });
 
@@ -17439,9 +17860,14 @@ async function sendA2AResponse(params) {
   const bridgedText = text === void 0 ? text : rewriteOutboundApprovalText(sessionId, text);
   const artifact = {
     taskId,
+    taskUniqId: taskId,
+    taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
+    isNew: !isLegacyAppVersion(taskId),
     append,
-    lastChunk: true,
+    lastChunk: params.lastChunk ?? final,
+    streamingTextId: getOrCreateStreamingTextId(taskId),
+    isReasoningFinished: isReasoningFinished(taskId),
     final,
     artifact: {
       artifactId: v4_default(),
@@ -17473,25 +17899,44 @@ async function sendA2AResponse(params) {
     };
     log.log(`[A2A_RESPONSE] Including error code: ${errorCode}`);
   }
+  if (typeof bridgedText === "string" && bridgedText.length > 0) {
+    markBodyTextSent(taskId);
+  }
   if (shouldLog) {
     const redactedText = redactSensitiveText(bridgedText ?? "");
-    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, text=${buildTextPreview(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
+    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, lastChunk=${artifact.lastChunk}, streamingTextId=${artifact.streamingTextId}, taskUniqIndexId=${artifact.taskUniqIndexId}, isReasoningFinished=${artifact.isReasoningFinished}, text=${buildTextPreview(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
   }
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+  if (final) {
+    releaseStreamingTextId(taskId);
+    releaseReasoningState(taskId);
+    releaseReasoningSegment(taskId);
+    releaseStatusCardSeq(taskId);
+    releaseBodyRoundCards(taskId);
+    releaseAppVersion(taskId);
+    clearBodyTextState(taskId);
+  }
   if (shouldLog) {
     log.log(`[A2A_RESPONSE] Message sent successfully`);
   }
 }
 async function sendReasoningTextUpdate(params) {
   const { config, sessionId, taskId, messageId, text, append = true } = params;
-  const log = logger.withContext(sessionId, taskId);
   const bridgedText = rewriteOutboundApprovalText(sessionId, text);
   const artifact = {
     taskId,
+    taskUniqId: taskId,
+    // taskUniqIndexId 取思考块开块时锁存的序号（utils/reasoning-segment）：
+    // 思考流中途下发的状态卡 command 会推高全局计数，块的过程帧/收尾帧
+    // 必须同序号，否则端侧把同一 streamingTextId 段映射到两张卡片
+    taskUniqIndexId: peekReasoningSegmentSeq(taskId),
     kind: "artifact-update",
+    isNew: !isLegacyAppVersion(taskId),
     append,
-    lastChunk: true,
+    lastChunk: params.lastChunk ?? false,
     final: false,
+    streamingTextId: params.streamingTextId ?? getOrCreateStreamingTextId(taskId),
+    isReasoningFinished: params.isReasoningFinished ?? isReasoningFinished(taskId),
     artifact: {
       artifactId: v4_default(),
       parts: [
@@ -17509,6 +17954,13 @@ async function sendReasoningTextUpdate(params) {
     result: artifact
   };
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+  if (bridgedText.length > 0) {
+    if (params.lastChunk === true) {
+      noteReasoningCloseFrameSentForToolCarry(taskId);
+    } else {
+      noteReasoningMessageSentForToolCarry(taskId);
+    }
+  }
 }
 async function sendStatusUpdate(params) {
   const { config, sessionId, taskId, messageId, text, state: state2 } = params;
@@ -17524,11 +17976,14 @@ async function sendStatusUpdate(params) {
       }
     ]
   });
+  const currentStreamingTextId = params.streamingTextId ?? peekStreamingTextId(taskId);
   const statusUpdate = {
     taskId,
     kind: "status-update",
+    isNew: !isLegacyAppVersion(taskId),
     final: false,
     // Status updates should not end the stream
+    ...currentStreamingTextId ? { streamingTextId: currentStreamingTextId } : {},
     status: {
       message: statusMessage,
       state: state2
@@ -17540,6 +17995,9 @@ async function sendStatusUpdate(params) {
     result: statusUpdate
   };
   log.log(`[A2A_STATUS] Sending status-update, text="${redactedText}"`);
+  if (params.logFullFrame) {
+    log.log(`[A2A_STATUS] full frame=${JSON.stringify(jsonRpcResponse)}`);
+  }
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
 }
 async function sendCommand(params) {
@@ -17552,14 +18010,18 @@ async function sendCommand(params) {
     logger.log(`[CRON-CMD-BLOCKED] sendCommandViaPush disabled, command dropped: ${commands[0]?.header?.name ?? commands[0]?.payload?.executeParam?.intentName ?? "unknown"}`);
     return;
   }
-  const log = logger.withContext(sessionId, taskId);
   const transportCommands = commands.map(redactCommandForTransport);
   const artifact = {
     taskId,
+    taskUniqId: taskId,
+    taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
+    isNew: !isLegacyAppVersion(taskId),
     append: false,
-    lastChunk: true,
+    lastChunk: params.lastChunk ?? false,
     final: params.final ?? false,
+    streamingTextId: peekLastSentStreamingTextId(taskId) ?? getOrCreateStreamingTextId(taskId),
+    isReasoningFinished: isReasoningFinished(taskId),
     artifact: {
       artifactId: v4_default(),
       parts: [
@@ -17577,9 +18039,69 @@ async function sendCommand(params) {
     id: messageId,
     result: artifact
   };
-  log.log(`[A2A_COMMAND] Sending command`);
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
-  log.log(`[A2A_COMMAND] Command sent successfully`);
+}
+async function sendDisplayTaskCardData(params) {
+  const command = {
+    header: { namespace: "UserInteraction", name: "DisplayTaskCardData" },
+    payload: {
+      index: params.index,
+      isDisplayTaskCardData: true,
+      isFinal: params.isFinal,
+      stepName: params.stepName,
+      taskUniqId: params.taskId,
+      taskUniqIndexId: params.index
+    }
+  };
+  await sendCommand({
+    config: params.config,
+    sessionId: params.sessionId,
+    taskId: params.taskId,
+    messageId: params.messageId,
+    command,
+    toolCallId: params.toolCallId
+  });
+  logger.withContext(params.sessionId, params.taskId).log(
+    `[STEP-INFO] cardType=DisplayTaskCardData, taskUniqId=${params.taskId}, taskUniqIndexId=${params.index}, stepName=${params.stepName}`
+  );
+}
+async function sendExecuteStatusCard(params) {
+  const { config, sessionId, taskId, messageId } = params;
+  const log = logger.withContext(sessionId, taskId);
+  const seq = params.taskUniqIndexId ?? nextStatusCardSeq(taskId);
+  const thinkIndex = params.thinkIndex ?? takeToolCardThinkIndex(taskId);
+  await sendDisplayTaskCardData({
+    config,
+    sessionId,
+    taskId,
+    messageId,
+    toolCallId: params.toolCallId,
+    index: seq,
+    stepName: params.text,
+    isFinal: false
+  });
+  const command = {
+    header: { namespace: "UserInteraction", name: "DisplayExecuteStatusCard" },
+    payload: {
+      text: params.text,
+      isFinal: params.isFinal ?? true,
+      taskUniqId: taskId,
+      taskUniqIndexId: seq,
+      ...params.symbolName ? { symbolName: params.symbolName } : {},
+      ...thinkIndex && thinkIndex.length > 0 ? { thinkIndex } : {}
+    }
+  };
+  await sendCommand({
+    config,
+    sessionId,
+    taskId,
+    messageId,
+    command,
+    toolCallId: params.toolCallId
+  });
+  log.log(
+    `[STEP-INFO] cardType=DisplayExecuteStatusCard, taskUniqId=${taskId}, taskUniqIndexId=${seq}, text=${params.text}` + (thinkIndex && thinkIndex.length > 0 ? `, thinkIndex=${JSON.stringify(thinkIndex)}` : "")
+  );
 }
 async function sendCard(params) {
   const { config, sessionId, taskId, messageId, toolCallId } = params;
@@ -17589,10 +18111,15 @@ async function sendCard(params) {
   const log = logger.withContext(sessionId, taskId);
   const artifact = {
     taskId,
+    taskUniqId: taskId,
+    taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
+    isNew: !isLegacyAppVersion(taskId),
     append: false,
-    lastChunk: true,
+    lastChunk: params.lastChunk ?? false,
     final: params.final ?? false,
+    streamingTextId: getOrCreateStreamingTextId(taskId),
+    isReasoningFinished: isReasoningFinished(taskId),
     artifact: {
       artifactId: v4_default(),
       parts: [
@@ -17645,10 +18172,15 @@ async function sendReference(params) {
   };
   const artifact = {
     taskId,
+    taskUniqId: taskId,
+    taskUniqIndexId: getCurrentStatusCardSeq(taskId),
     kind: "artifact-update",
+    isNew: !isLegacyAppVersion(taskId),
     append: false,
-    lastChunk: true,
+    lastChunk: params.lastChunk ?? false,
     final: params.final ?? false,
+    streamingTextId: peekLastSentStreamingTextId(taskId) ?? getOrCreateStreamingTextId(taskId),
+    isReasoningFinished: isReasoningFinished(taskId),
     artifact: {
       artifactId: v4_default(),
       parts: [
@@ -17667,6 +18199,43 @@ async function sendReference(params) {
   log.log(`[A2A_REFERENCE] Sending reference, items=${referenceItems.length}`);
   await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
   log.log(`[A2A_REFERENCE] Reference sent successfully`);
+}
+async function sendFileArtifacts(params) {
+  const { config, sessionId, taskId, messageId, files } = params;
+  const log = logger.withContext(sessionId, taskId);
+  for (const file of files) {
+    const jsonRpcResponse = {
+      jsonrpc: "2.0",
+      id: messageId,
+      result: {
+        kind: "artifact-update",
+        isNew: true,
+        append: true,
+        lastChunk: false,
+        final: false,
+        artifact: {
+          artifactId: taskId,
+          parts: [
+            {
+              kind: "file",
+              file: {
+                name: file.fileName,
+                ...file.mimeType ? { mimeType: file.mimeType } : {},
+                fileId: file.fileId,
+                ...file.fileUrl ? { fileUrl: file.fileUrl } : {}
+              }
+            }
+          ]
+        }
+      },
+      error: { code: 0 }
+    };
+    log.log(`[A2A_FILE] Sending deferred file artifact, fileName=${file.fileName}`);
+    await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+  }
+  if (files.length > 0) {
+    log.log(`[A2A_FILE] Deferred file artifacts sent, count=${files.length}`);
+  }
 }
 async function sendClearContextResponse(params) {
   const { config, sessionId, messageId } = params;
@@ -17713,6 +18282,13 @@ var init_formatter = __esm({
   "src/formatter.ts"() {
     init_esm_node();
     init_outbound_gateway();
+    init_streaming_text_id();
+    init_reasoning_state();
+    init_reasoning_segment();
+    init_status_card_seq();
+    init_body_round_cards();
+    init_app_version();
+    init_body_text_state();
     init_logger();
     init_sensitive_redactor();
     init_approval_bridge();
@@ -17721,6 +18297,96 @@ var init_formatter = __esm({
     init_cron_push_map();
     init_pushid_manager();
     MESSAGE_CONTENT_KEYS = /* @__PURE__ */ new Set(["text", "reasoningText", "content", "message"]);
+  }
+});
+
+// src/utils/pending-references.ts
+function appendPendingReferences(taskId, items) {
+  const existing = pendingReferencesByTask.get(taskId);
+  if (existing) {
+    existing.push(...items);
+  } else {
+    pendingReferencesByTask.set(taskId, [...items]);
+  }
+}
+function drainPendingReferences(taskId) {
+  const items = pendingReferencesByTask.get(taskId);
+  if (!items || items.length === 0) return [];
+  pendingReferencesByTask.delete(taskId);
+  return items;
+}
+function releasePendingReferences(taskId) {
+  pendingReferencesByTask.delete(taskId);
+}
+var pendingReferencesByTask;
+var init_pending_references = __esm({
+  "src/utils/pending-references.ts"() {
+    pendingReferencesByTask = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/utils/pending-files.ts
+function appendPendingFiles(taskId, items) {
+  if (items.length === 0) return;
+  const existing = pendingFilesByTask.get(taskId);
+  if (existing) {
+    existing.push(...items);
+  } else {
+    pendingFilesByTask.set(taskId, [...items]);
+  }
+}
+function drainPendingFiles(taskId) {
+  const items = pendingFilesByTask.get(taskId);
+  if (!items || items.length === 0) return [];
+  pendingFilesByTask.delete(taskId);
+  return items;
+}
+function releasePendingFiles(taskId) {
+  pendingFilesByTask.delete(taskId);
+}
+var pendingFilesByTask;
+var init_pending_files = __esm({
+  "src/utils/pending-files.ts"() {
+    pendingFilesByTask = /* @__PURE__ */ new Map();
+  }
+});
+
+// src/utils/delta-text-tracker.ts
+function getOrCreateState2(sessionId) {
+  let state2 = stateBySession.get(sessionId);
+  if (!state2) {
+    state2 = { bodySent: "", reasoningSent: "" };
+    stateBySession.set(sessionId, state2);
+  }
+  return state2;
+}
+function computeBodyDelta(sessionId, fullText) {
+  const state2 = getOrCreateState2(sessionId);
+  if (state2.bodySent && fullText.startsWith(state2.bodySent)) {
+    const delta = fullText.slice(state2.bodySent.length);
+    state2.bodySent = fullText;
+    return delta;
+  }
+  state2.bodySent = fullText;
+  return fullText;
+}
+function computeReasoningDelta(sessionId, snapshot) {
+  const state2 = getOrCreateState2(sessionId);
+  if (state2.reasoningSent && snapshot.startsWith(state2.reasoningSent)) {
+    const delta = snapshot.slice(state2.reasoningSent.length);
+    state2.reasoningSent = snapshot;
+    return delta;
+  }
+  state2.reasoningSent = snapshot;
+  return snapshot;
+}
+function releaseDeltaTextTracker(sessionId) {
+  stateBySession.delete(sessionId);
+}
+var stateBySession;
+var init_delta_text_tracker = __esm({
+  "src/utils/delta-text-tracker.ts"() {
+    stateBySession = /* @__PURE__ */ new Map();
   }
 });
 
@@ -17853,6 +18519,7 @@ __export(conversation_manager_exports, {
   getWaitState: () => getWaitState,
   hasActiveTask: () => hasActiveTask,
   hasWaitState: () => hasWaitState,
+  isBodyTextProduced: () => isBodyTextProduced,
   isTurnCanceled: () => isTurnCanceled,
   isTurnSuperseded: () => isTurnSuperseded,
   listActiveTaskBindings: () => listActiveTaskBindings,
@@ -17862,8 +18529,11 @@ __export(conversation_manager_exports, {
   markSubagentSpawned: () => markSubagentSpawned,
   markTurnCanceled: () => markTurnCanceled,
   markTurnInflight: () => markTurnInflight,
+  maybeEnqueueBodyRoundStartCards: () => maybeEnqueueBodyRoundStartCards,
   registerTask: () => registerTask,
   resolveBySessionKey: () => resolveBySessionKey,
+  rotateStreamingTextForBodyStart: () => rotateStreamingTextForBodyStart,
+  rotateStreamingTextSegment: () => rotateStreamingTextSegment,
   setSessionState: () => setSessionState,
   startStatusHeartbeat: () => startStatusHeartbeat,
   stopStatusHeartbeat: () => stopStatusHeartbeat,
@@ -17885,6 +18555,18 @@ function getSession(sessionId) {
 function deleteSession(sessionId) {
   const session = sessions.get(sessionId);
   session?.outboundQueue.destroy();
+  for (const entry of session?.tasks ?? []) {
+    releaseStreamingTextId(entry.taskId);
+    releaseLastSentStreamingTextId(entry.taskId);
+    releaseStatusCardSeq(entry.taskId);
+    releaseAppVersion(entry.taskId);
+    clearBodyTextState(entry.taskId);
+    releaseReasoningSegment(entry.taskId);
+    releasePendingReferences(entry.taskId);
+    releasePendingFiles(entry.taskId);
+    releaseBodyRoundCards(entry.taskId);
+  }
+  releaseDeltaTextTracker(sessionId);
   sessions.delete(sessionId);
 }
 function listSessions() {
@@ -17907,6 +18589,7 @@ function registerTask(sessionId, taskId, messageId) {
   }
   session.tasks = session.tasks.filter((entry) => entry.taskId !== taskId);
   session.tasks.push({ taskId, messageId, updatedAt: Date.now() });
+  session.state = "working";
   return isUpdate;
 }
 function completeTask(sessionId, expectedTaskId) {
@@ -17914,6 +18597,15 @@ function completeTask(sessionId, expectedTaskId) {
   if (!session) return;
   if (!expectedTaskId) {
     logger.log(`[TASK_MANAGER] Removing taskId`);
+    for (const entry of session.tasks) {
+      releaseStreamingTextId(entry.taskId);
+      releaseLastSentStreamingTextId(entry.taskId);
+      releaseReasoningSegment(entry.taskId);
+      releasePendingReferences(entry.taskId);
+      releasePendingFiles(entry.taskId);
+      releaseBodyRoundCards(entry.taskId);
+    }
+    releaseDeltaTextTracker(sessionId);
     session.tasks = [];
     return;
   }
@@ -17924,6 +18616,12 @@ function completeTask(sessionId, expectedTaskId) {
     return;
   }
   session.tasks = nextTasks;
+  releaseStreamingTextId(expectedTaskId);
+  releaseLastSentStreamingTextId(expectedTaskId);
+  releaseReasoningSegment(expectedTaskId);
+  releasePendingReferences(expectedTaskId);
+  releasePendingFiles(expectedTaskId);
+  releaseBodyRoundCards(expectedTaskId);
   if (nextTasks.length > 0) {
     logger.log(`[TASK_MANAGER] Removed taskId ${expectedTaskId}, restored current taskId ${nextTasks[nextTasks.length - 1].taskId}`);
   } else {
@@ -17934,6 +18632,168 @@ function getCurrentTask(sessionId) {
   const session = sessions.get(sessionId);
   if (!session || session.tasks.length === 0) return null;
   return session.tasks[session.tasks.length - 1];
+}
+async function rotateStreamingTextSegment(params) {
+  const { config, sessionId, taskId, messageId } = params;
+  const session = sessions.get(sessionId);
+  const assembler = session?.assembler;
+  if (session && assembler?.hasContent()) {
+    const oldSegmentText = assembler.getFullText();
+    session.outboundQueue.enqueue({
+      taskId,
+      label: "segment-flush",
+      send: () => sendA2AResponse({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        text: oldSegmentText,
+        append: false,
+        final: false,
+        lastChunk: true
+      })
+    });
+    await session.outboundQueue.whenIdle();
+  }
+  if (session && isReasoningSegmentOpen(taskId)) {
+    markReasoningBlockClosed(taskId, peekReasoningSegmentSeq(taskId));
+    noteReasoningBlockClosedForToolCarry(taskId, peekReasoningSegmentSeq(taskId));
+    closeReasoningSegment(taskId);
+    const segmentText = peekReasoningSegmentText(taskId);
+    const streamingTextId = peekStreamingTextId(taskId);
+    session.outboundQueue.enqueue({
+      taskId,
+      label: "reasoning-segment-end-status",
+      send: () => sendStatusUpdate({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        text: "\u5DF2\u5B8C\u6210\u6DF1\u5EA6\u601D\u8003",
+        state: "working",
+        streamingTextId
+      })
+    });
+    session.outboundQueue.enqueue({
+      taskId,
+      label: "reasoning-segment-flush",
+      send: () => sendReasoningTextUpdate({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        text: segmentText,
+        append: false,
+        isReasoningFinished: false,
+        lastChunk: true,
+        streamingTextId
+      })
+    });
+    await session.outboundQueue.whenIdle();
+  }
+  cutReasoningSegment(taskId);
+  const newId = rotateStreamingTextId(taskId);
+  advanceStatusCardSeqForSegment(taskId);
+  assembler?.cutSegment();
+  clearBodyTextState(taskId);
+  return newId;
+}
+async function rotateStreamingTextForBodyStart(params) {
+  const { config, sessionId, taskId, messageId } = params;
+  const session = sessions.get(sessionId);
+  const assembler = session?.assembler;
+  if (isLegacyAppVersion(taskId) || assembler?.hasContent() || isBodyTextSent(taskId) || !isReasoningSegmentOpen(taskId) && peekReasoningSegmentText(taskId).length === 0) {
+    return getOrCreateStreamingTextId(taskId);
+  }
+  if (session) await session.outboundQueue.whenIdle();
+  if (session && isReasoningSegmentOpen(taskId)) {
+    markReasoningBlockClosed(taskId, peekReasoningSegmentSeq(taskId));
+    noteReasoningBlockClosedForToolCarry(taskId, peekReasoningSegmentSeq(taskId));
+    closeReasoningSegment(taskId);
+    const segmentText = peekReasoningSegmentText(taskId);
+    const streamingTextId = peekStreamingTextId(taskId);
+    session.outboundQueue.enqueue({
+      taskId,
+      label: "reasoning-body-switch-status",
+      send: () => sendStatusUpdate({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        text: "\u5DF2\u5B8C\u6210\u6DF1\u5EA6\u601D\u8003",
+        state: "working",
+        streamingTextId
+      })
+    });
+    session.outboundQueue.enqueue({
+      taskId,
+      label: "reasoning-body-switch-flush",
+      send: () => sendReasoningTextUpdate({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        text: segmentText,
+        append: false,
+        isReasoningFinished: false,
+        lastChunk: true,
+        streamingTextId
+      })
+    });
+    await session.outboundQueue.whenIdle();
+  }
+  const newId = rotateStreamingTextId(taskId);
+  advanceStatusCardSeqForSegment(taskId);
+  logger.withContext(sessionId, taskId).log(
+    `[SEGMENT] reasoning\u2192body switch, rotated streamingTextId=${newId}`
+  );
+  return newId;
+}
+function maybeEnqueueBodyRoundStartCards(params) {
+  const { config, sessionId, taskId, messageId } = params;
+  if (isLegacyAppVersion(taskId)) return;
+  const session = sessions.get(sessionId);
+  if (!session) return;
+  if (session.assembler?.hasContent() || isBodyTextSent(taskId)) return;
+  const openCardIndex = claimStatusCardSeqForBodyRound(taskId);
+  const openThinkIndex = peekClosedReasoningSlots(taskId);
+  session.outboundQueue.enqueue({
+    taskId,
+    label: "body-round-open",
+    send: () => sendExecuteStatusCard({
+      config,
+      sessionId,
+      taskId,
+      messageId,
+      text: "\u751F\u6210\u56DE\u590D",
+      isFinal: false,
+      taskUniqIndexId: openCardIndex,
+      thinkIndex: openThinkIndex
+    })
+  });
+  const prevCardIndex = takeOpenBodyRoundCardIndex(taskId);
+  if (prevCardIndex !== void 0) {
+    session.outboundQueue.enqueue({
+      taskId,
+      label: "body-round-close",
+      send: () => sendExecuteStatusCard({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        text: "\u751F\u6210\u56DE\u590D\u5DF2\u5B8C\u6210",
+        isFinal: true,
+        taskUniqIndexId: prevCardIndex,
+        thinkIndex: [...peekClosedReasoningSlots(taskId), String(prevCardIndex)].sort((a, b) => Number(a) - Number(b))
+      })
+    });
+  }
+  openBodyRound(taskId, openCardIndex);
+}
+function isBodyTextProduced(sessionId, taskId) {
+  if (isBodyTextSent(taskId)) return true;
+  const session = sessions.get(sessionId);
+  return session?.assembler?.hasContent() ?? false;
 }
 function getCurrentTaskId(sessionId) {
   return getCurrentTask(sessionId)?.taskId ?? null;
@@ -18010,29 +18870,33 @@ function cacheXYConfig(config) {
 function getCachedXYConfig() {
   return _g3.__xyConversationCachedConfig;
 }
-function startStatusHeartbeat(sessionId, text = DEFAULT_STATUS_TEXT) {
+function startStatusHeartbeat(sessionId) {
   const session = getOrCreateSession(sessionId);
   if (session.statusTimer) {
     clearInterval(session.statusTimer);
   }
-  logger.withContext(sessionId, "").log(`[STATUS-HEARTBEAT] Starting manager-owned heartbeat, text="${text}"`);
+  logger.withContext(sessionId, "").log(`[STATUS-HEARTBEAT] Starting manager-owned keepalive card heartbeat`);
   session.statusTimer = setInterval(() => {
+    if (session.state !== "working" && session.state !== "waiting-subagent") {
+      return;
+    }
     const current = getCurrentTask(sessionId);
     const config = getCachedXYConfig();
     if (!current || !config) {
       return;
     }
-    void sendStatusUpdate({
+    void sendDisplayTaskCardData({
       config,
       sessionId,
       taskId: current.taskId,
       messageId: current.messageId,
-      text,
-      state: "working"
+      index: getCurrentStatusCardSeq(current.taskId),
+      stepName: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019",
+      isFinal: false
     }).catch((err) => {
-      logger.withContext(sessionId, current.taskId).error(`Failed to send status update:`, err);
+      logger.withContext(sessionId, current.taskId).error(`Failed to send keepalive card:`, err);
     });
-  }, STATUS_HEARTBEAT_INTERVAL_MS);
+  }, STATUS_KEEPALIVE_INTERVAL_MS);
 }
 function stopStatusHeartbeat(sessionId) {
   const session = sessions.get(sessionId);
@@ -18201,51 +19065,123 @@ async function deliverSubagentFinalResult(params) {
   const effectiveMessageId = getCurrentMessageId(state2.sessionId) ?? state2.messageId;
   const terminalFrameDelayMs = config.terminalFrameDelayMs ?? 0;
   const session = sessions.get(state2.sessionId);
-  const sendCompletedStatus = () => sendStatusUpdate({
-    config,
-    sessionId: state2.sessionId,
-    taskId: effectiveTaskId,
-    messageId: effectiveMessageId,
-    text: "\u4EFB\u52A1\u5904\u7406\u5DF2\u5B8C\u6210~",
-    state: "completed"
-  });
-  const sendFinal = () => sendA2AResponse({
+  const sendMergedFinal = () => sendA2AResponse({
     config,
     sessionId: state2.sessionId,
     taskId: effectiveTaskId,
     messageId: effectiveMessageId,
     text: finalText,
     append: false,
-    final: true
+    final: true,
+    lastChunk: true
+  });
+  const pendingReferences = drainPendingReferences(effectiveTaskId);
+  const sendPendingReferences = () => sendReference({
+    config,
+    sessionId: state2.sessionId,
+    taskId: effectiveTaskId,
+    messageId: effectiveMessageId,
+    references: pendingReferences
+  });
+  const pendingFiles = drainPendingFiles(effectiveTaskId);
+  const sendPendingFiles = () => sendFileArtifacts({
+    config,
+    sessionId: state2.sessionId,
+    taskId: effectiveTaskId,
+    messageId: effectiveMessageId,
+    files: pendingFiles
+  });
+  const sendTaskCardFinal = () => sendDisplayTaskCardData({
+    config,
+    sessionId: state2.sessionId,
+    taskId: effectiveTaskId,
+    messageId: effectiveMessageId,
+    index: getCurrentStatusCardSeq(effectiveTaskId),
+    stepName: "\u4EFB\u52A1\u5904\u7406\u5DF2\u5B8C\u6210",
+    isFinal: true
   });
   if (session) {
+    maybeEnqueueBodyRoundStartCards({
+      config,
+      sessionId: state2.sessionId,
+      taskId: effectiveTaskId,
+      messageId: effectiveMessageId
+    });
+    {
+      const openRoundCardIndex = takeOpenBodyRoundCardIndex(effectiveTaskId);
+      if (openRoundCardIndex !== void 0) {
+        session.outboundQueue.enqueue({
+          taskId: effectiveTaskId,
+          label: "subagent-body-round-close",
+          send: () => sendExecuteStatusCard({
+            config,
+            sessionId: state2.sessionId,
+            taskId: effectiveTaskId,
+            messageId: effectiveMessageId,
+            text: "\u751F\u6210\u56DE\u590D\u5DF2\u5B8C\u6210",
+            isFinal: true,
+            taskUniqIndexId: openRoundCardIndex,
+            // 显式空数组：本卡不参与工具卡 thinkIndex 捎带
+            thinkIndex: []
+          })
+        });
+      }
+    }
+    if (pendingFiles.length > 0) {
+      session.outboundQueue.enqueue({
+        taskId: effectiveTaskId,
+        label: "subagent-files",
+        send: sendPendingFiles
+      });
+    }
+    if (pendingReferences.length > 0) {
+      session.outboundQueue.enqueue({
+        taskId: effectiveTaskId,
+        label: "subagent-references",
+        send: sendPendingReferences
+      });
+    }
     session.outboundQueue.enqueue({
       taskId: effectiveTaskId,
-      label: "subagent-terminal-status",
-      delayMs: terminalFrameDelayMs,
-      send: sendCompletedStatus
+      label: "subagent-task-card-final",
+      send: sendTaskCardFinal
     });
     session.outboundQueue.enqueue({
       taskId: effectiveTaskId,
       label: "subagent-final",
       delayMs: terminalFrameDelayMs,
-      send: sendFinal
+      send: sendMergedFinal
     });
     await session.outboundQueue.whenIdle();
   } else {
-    await sendCompletedStatus();
-    await sendFinal();
+    if (pendingFiles.length > 0) {
+      await sendPendingFiles();
+    }
+    if (pendingReferences.length > 0) {
+      await sendPendingReferences();
+    }
+    await sendTaskCardFinal();
+    await sendMergedFinal();
   }
   clearWaitState(state2.sessionId, reason ?? "all-subagent-results-delivered", state2.taskId);
   completeTask(state2.sessionId);
   setSessionState(state2.sessionId, "completed");
   log.log(`[SUBAGENT-FINAL] Subagent final delivered, reason=${reason}, effectiveTaskId=${effectiveTaskId}`);
 }
-var _g3, sessions, sessionKeyIndex, STATUS_HEARTBEAT_INTERVAL_MS, DEFAULT_STATUS_TEXT, WAIT_TTL_MS;
+var _g3, sessions, sessionKeyIndex, STATUS_KEEPALIVE_INTERVAL_MS, WAIT_TTL_MS;
 var init_conversation_manager = __esm({
   "src/conversation/conversation-manager.ts"() {
     init_logger();
+    init_streaming_text_id();
+    init_status_card_seq();
+    init_body_round_cards();
+    init_app_version();
+    init_body_text_state();
+    init_reasoning_segment();
     init_formatter();
+    init_pending_references();
+    init_pending_files();
+    init_delta_text_tracker();
     init_conversation_session();
     _g3 = globalThis;
     if (!_g3.__xyConversationSessions) {
@@ -18259,8 +19195,7 @@ var init_conversation_manager = __esm({
     }
     sessions = _g3.__xyConversationSessions;
     sessionKeyIndex = _g3.__xySessionKeyIndex;
-    STATUS_HEARTBEAT_INTERVAL_MS = 30 * 1e3;
-    DEFAULT_STATUS_TEXT = "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019~";
+    STATUS_KEEPALIVE_INTERVAL_MS = 30 * 1e3;
     WAIT_TTL_MS = 30 * 60 * 1e3;
   }
 });
@@ -18665,15 +19600,23 @@ var init_stream_assembler = __esm({
       currentModelText = "";
       /** deliver(kind=final) 捕获的权威最终文本（最后一次模型调用的 canonical 文本）。 */
       canonicalFinalText = "";
+      /** 跨模型调用边界是否累加历史轮文本（低版本链路置 false，见 StreamAssemblerOptions）。 */
+      accumulateModelSegments;
+      constructor(options = {}) {
+        this.accumulateModelSegments = options.accumulateModelSegments ?? true;
+      }
       /**
        * onPartialReply 喂入。text 是当前模型调用的累计清洗文本（非增量）。
        * 同一调用内 text 递增；跨调用时 text 刷新（!startsWith），此时把上一个
-       * 调用的完整文本锁存为 model 段。
+       * 调用的完整文本锁存为 model 段（不累加模式下直接丢弃 —— 历史装配文本
+       * 在下一轮发送前清空，正文只携带本轮文本）。
        */
       onStreamText(text) {
         let latched = false;
         if (this.currentModelText && !text.startsWith(this.currentModelText)) {
-          this.segments.push({ kind: "model", text: this.currentModelText });
+          if (this.accumulateModelSegments) {
+            this.segments.push({ kind: "model", text: this.currentModelText });
+          }
           latched = true;
         }
         this.currentModelText = text;
@@ -18683,12 +19626,14 @@ var init_stream_assembler = __esm({
        * 工具注入非模型文本（如卡片 DSL）。先锁存当前模型文本（保持相对位置），
        * 再把注入内容作为独立段压入。注入后所有全量帧自然携带该段，
        * 客户端 append:false 整体替换不会抹掉注入内容。
+       * 不累加模式：注入前的模型文本属于历史轮，与 onStreamText 边界同语义
+       * 直接丢弃；注入段本身保留，后续全量帧（含终帧）继续携带。
        */
       injectArtifact(text) {
-        if (this.currentModelText) {
+        if (this.currentModelText && this.accumulateModelSegments) {
           this.segments.push({ kind: "model", text: this.currentModelText });
-          this.currentModelText = "";
         }
+        this.currentModelText = "";
         this.segments.push({ kind: "injected", text });
         return this.getFullText();
       }
@@ -18753,6 +19698,18 @@ var init_stream_assembler = __esm({
       /** 是否有任何已装配内容（已锁存段或当前模型文本非空）。 */
       hasContent() {
         return this.segments.length > 0 || this.currentModelText.length > 0;
+      }
+      /**
+       * 分段边界切分（工具调用边界、streamingTextId 轮换时调用）：
+       * 已装配内容（含当前模型文本）全部移出全文本 —— 之后的
+       * getFullText()/finalize() 只返回边界之后新段的文本，新 streamingTextId
+       * 的文本帧不再叠加携带旧 id 段的内容。
+       * canonical 权威文本只在 turn 末尾 deliver(kind=final) 时捕获（晚于任何
+       * 切分），不在此处清除。无内容时为 no-op。
+       */
+      cutSegment() {
+        this.segments = [];
+        this.currentModelText = "";
       }
       /** 新 turn 清空（dispatcher 创建时调用；终帧发出后也应复位）。 */
       reset() {
@@ -18940,6 +19897,18 @@ function createXYReplyDispatcher(params) {
         hasSentResponse = true;
         const deliverTaskId = getActiveTaskId();
         const deliverMessageId = getActiveMessageId();
+        await rotateStreamingTextForBodyStart({
+          config,
+          sessionId,
+          taskId: deliverTaskId,
+          messageId: deliverMessageId
+        });
+        maybeEnqueueBodyRoundStartCards({
+          config,
+          sessionId,
+          taskId: deliverTaskId,
+          messageId: deliverMessageId
+        });
         outboundQueue.enqueue({
           taskId: deliverTaskId,
           label: "deliver-fallback",
@@ -18999,12 +19968,953 @@ function createXYReplyDispatcher(params) {
           `[ON-IDLE] Waiting for subagent completions ${waitState.deliveredCompletions}/${waitState.expectedCompletions}, suppressing final:true`
         );
         setSessionState(sessionId, "waiting-subagent");
+        return;
+      }
+      if (waitState && waitState.deliveredCompletions >= waitState.expectedCompletions) {
+        scopedLog().log(
+          `[ON-IDLE] Subagent completions all arrived (${waitState.deliveredCompletions}/${waitState.expectedCompletions}), deferring final to parent-settled path`
+        );
+        if (waitState.parentSettled) {
+          await deliverSubagentFinalResult({
+            state: waitState,
+            reason: "parent-settled-completions-ready-at-idle"
+          });
+        }
+        return;
+      }
+      try {
+        if (hasSentResponse && !finalSent) {
+          await streamChain;
+          if (isOutputStale()) {
+            scopedLog().log(`[ON-IDLE] Turn became canceled/superseded while draining stream callbacks`);
+            return;
+          }
+          const terminalTaskId = getActiveTaskId();
+          const terminalMessageId = getActiveMessageId();
+          setSessionState(sessionId, "completing");
+          const { fullText: fullFinalText, resolvedLastText, diagnostic } = assembler.finalize();
+          if (diagnostic === "patched-tail") {
+            scopedLog().log(`[ON-IDLE] Streamed text missing tail, patched from final payload, canonical.length=${resolvedLastText.length}`);
+          } else if (diagnostic === "canonical-shorter") {
+            scopedLog().log(`[ON-IDLE] Final text shorter than streamed, using canonical final, canonical.length=${resolvedLastText.length}`);
+          } else if (diagnostic === "diverged") {
+            scopedLog().warn(`[ON-IDLE] Final text diverged from streamed text, using canonical final, canonical.length=${resolvedLastText.length}`);
+          }
+          const crossTaskResultMessage = resolvedLastText.trim();
+          scopedLog().log(`[ON-IDLE] [SendCrossResult]Sending cross-task result, resultMessage.length=${crossTaskResultMessage.length}`);
+          try {
+            const runCrossTaskContext = getRunCrossTaskContext();
+            if (runCrossTaskContext) {
+              const ctx = runCrossTaskContext;
+              outboundQueue.enqueue({
+                taskId: terminalTaskId,
+                label: "cross-task-result",
+                send: () => sendRunCrossTaskResult({
+                  config,
+                  sessionId,
+                  taskId: terminalTaskId,
+                  messageId: terminalMessageId,
+                  context: ctx,
+                  resultCode: "0",
+                  resultMessage: crossTaskResultMessage
+                })
+              });
+            }
+            {
+              const openRoundCardIndex = takeOpenBodyRoundCardIndex(terminalTaskId);
+              if (openRoundCardIndex !== void 0) {
+                outboundQueue.enqueue({
+                  taskId: terminalTaskId,
+                  label: "terminal-body-round-close",
+                  send: () => sendExecuteStatusCard({
+                    config,
+                    sessionId,
+                    taskId: terminalTaskId,
+                    messageId: terminalMessageId,
+                    text: "\u751F\u6210\u56DE\u590D\u5DF2\u5B8C\u6210",
+                    isFinal: true,
+                    taskUniqIndexId: openRoundCardIndex,
+                    // 显式空数组：本卡不参与工具卡 thinkIndex 捎带
+                    thinkIndex: []
+                  })
+                });
+              }
+            }
+            {
+              const pendingFiles = drainPendingFiles(terminalTaskId);
+              if (pendingFiles.length > 0) {
+                outboundQueue.enqueue({
+                  taskId: terminalTaskId,
+                  label: "terminal-files",
+                  send: () => sendFileArtifacts({
+                    config,
+                    sessionId,
+                    taskId: terminalTaskId,
+                    messageId: terminalMessageId,
+                    files: pendingFiles
+                  })
+                });
+              }
+            }
+            {
+              const pendingReferences = drainPendingReferences(terminalTaskId);
+              if (pendingReferences.length > 0) {
+                outboundQueue.enqueue({
+                  taskId: terminalTaskId,
+                  label: "terminal-references",
+                  delayMs: terminalFrameDelayMs,
+                  send: () => sendReference({
+                    config,
+                    sessionId,
+                    taskId: terminalTaskId,
+                    messageId: terminalMessageId,
+                    references: pendingReferences
+                  })
+                });
+              }
+            }
+            outboundQueue.enqueue({
+              taskId: terminalTaskId,
+              label: "task-card-final",
+              send: () => sendDisplayTaskCardData({
+                config,
+                sessionId,
+                taskId: terminalTaskId,
+                messageId: terminalMessageId,
+                index: getCurrentStatusCardSeq(terminalTaskId),
+                stepName: "\u4EFB\u52A1\u5904\u7406\u5DF2\u5B8C\u6210",
+                isFinal: true
+              })
+            });
+            outboundQueue.enqueue({
+              taskId: terminalTaskId,
+              label: "terminal-final",
+              delayMs: terminalFrameDelayMs,
+              send: () => sendA2AResponse({
+                config,
+                sessionId,
+                taskId: terminalTaskId,
+                messageId: terminalMessageId,
+                text: fullFinalText || "",
+                append: !fullFinalText,
+                final: true,
+                lastChunk: true
+              })
+            });
+            await outboundQueue.whenIdle();
+            finalSent = true;
+            if (waitState) {
+              clearWaitState(sessionId, "main-final-delivered", taskId);
+            }
+            setSessionState(sessionId, "completed");
+            scopedLog().log(
+              `[ON-IDLE] Sent final response (${fullFinalText ? `append=false, full text length=${fullFinalText.length}` : "append=true, empty stream-end"})`
+            );
+          } catch (err) {
+            scopedLog().error(`[ON-IDLE] Failed to send final response:`, err);
+          }
+        } else {
+          scopedLog().log(`[ON-IDLE] Skipping final message: hasSentResponse=${hasSentResponse}, finalSent=${finalSent}`);
+          const failureTaskId = getActiveTaskId();
+          const failureMessageId = getActiveMessageId();
+          setSessionState(sessionId, "failed");
+          try {
+            const runCrossTaskContext = getRunCrossTaskContext();
+            if (runCrossTaskContext) {
+              const ctx = runCrossTaskContext;
+              outboundQueue.enqueue({
+                taskId: failureTaskId,
+                label: "cross-task-result-failure",
+                send: () => sendRunCrossTaskResult({
+                  config,
+                  sessionId,
+                  taskId: failureTaskId,
+                  messageId: failureMessageId,
+                  context: ctx,
+                  resultCode: "1",
+                  resultMessage: "\u4EFB\u52A1\u6267\u884C\u5F02\u5E38\uFF0C\u8BF7\u91CD\u8BD5"
+                })
+              });
+            }
+            outboundQueue.enqueue({
+              taskId: failureTaskId,
+              label: "failure-status",
+              send: () => sendStatusUpdate({
+                config,
+                sessionId,
+                taskId: failureTaskId,
+                messageId: failureMessageId,
+                text: "\u4EFB\u52A1\u5904\u7406\u4E2D\u65AD\u4E86",
+                state: "failed"
+              })
+            });
+            outboundQueue.enqueue({
+              taskId: failureTaskId,
+              label: "task-card-final-failure",
+              send: () => sendDisplayTaskCardData({
+                config,
+                sessionId,
+                taskId: failureTaskId,
+                messageId: failureMessageId,
+                index: getCurrentStatusCardSeq(failureTaskId),
+                stepName: "\u4EFB\u52A1\u5904\u7406\u5DF2\u5B8C\u6210",
+                isFinal: true
+              })
+            });
+            outboundQueue.enqueue({
+              taskId: failureTaskId,
+              label: "failure-final",
+              send: () => sendA2AResponse({
+                config,
+                sessionId,
+                taskId: failureTaskId,
+                messageId: failureMessageId,
+                text: "\u4EFB\u52A1\u6267\u884C\u5F02\u5E38\uFF0C\u8BF7\u91CD\u8BD5",
+                append: false,
+                final: true,
+                errorCode: 99921111,
+                errorMessage: "\u4EFB\u52A1\u6267\u884C\u5F02\u5E38\uFF0C\u8BF7\u91CD\u8BD5"
+              })
+            });
+            await outboundQueue.whenIdle();
+            finalSent = true;
+            setSessionState(sessionId, "failed");
+            scopedLog().log(`[ON-IDLE] Sent error response, code=99921111`);
+          } catch (err) {
+            scopedLog().error(`[ON-IDLE] Failed to send error response:`, err);
+          }
+        }
+      } finally {
+        await finishIdle(isTurnSuperseded(sessionId, taskId));
+      }
+    },
+    onCleanup: () => {
+      scopedLog().log(`[ON-CLEANUP] Reply cleanup`);
+    }
+  });
+  return {
+    dispatcher,
+    replyOptions: {
+      ...replyOptions,
+      // A2A 通道无需 typing indicator，禁用 typing 可让
+      // reply-turn-admission 层中的 signalTextDelta 变为 no-op，
+      // 从而消除导致 onPartialReply 回调乱序的异步 I/O 根源。
+      suppressTyping: true,
+      suppressToolErrorWarnings: true,
+      onModelSelected: prefixContext.onModelSelected,
+      onToolResult: async (payload) => {
+        if (isOutputStale()) return;
+        const text = payload.text ?? "";
+        scopedLog().log(`[TOOL-RESULT] Tool result, text.length: ${text.length}`);
+      },
+      onReasoningStream: async (payload) => {
+        if (isOutputStale()) return;
+        let text = payload.text ?? "";
+        const lines = text.split(/\r?\n/);
+        if (lines[0]?.trim() === "Reasoning:") {
+          text = lines.slice(1).join("\n").trim();
+        }
+        try {
+          if (text.length > 0) {
+            const reasoningTaskId = getActiveTaskId();
+            const segmentText = noteReasoningSnapshot(reasoningTaskId, text);
+            markReasoningStreaming(reasoningTaskId);
+            if (segmentText.length > 0) {
+              const streamingTextId = getOrCreateStreamingTextId(reasoningTaskId);
+              outboundQueue.enqueue({
+                taskId: reasoningTaskId,
+                label: "reasoning-stream",
+                send: () => sendReasoningTextUpdate({
+                  config,
+                  sessionId,
+                  taskId: reasoningTaskId,
+                  messageId: getActiveMessageId(),
+                  text: segmentText,
+                  append: false,
+                  streamingTextId
+                })
+              });
+            }
+          }
+        } catch (err) {
+          scopedLog().error(`[REASONING-STREAM] Failed to send reasoning text:`, err);
+        }
+      },
+      onReasoningEnd: async () => {
+        const endTaskId = getActiveTaskId();
+        markReasoningFinished(endTaskId);
+        scopedLog().log(`[REASONING-END] Reasoning finished, taskId=${endTaskId}`);
+        try {
+          const reasoningStreamingTextId = getOrCreateStreamingTextId(endTaskId);
+          if (!isBodyTextSent(endTaskId)) {
+            outboundQueue.enqueue({
+              taskId: endTaskId,
+              label: "reasoning-end-status",
+              send: () => sendStatusUpdate({
+                config,
+                sessionId,
+                taskId: endTaskId,
+                messageId: getActiveMessageId(),
+                text: "\u5DF2\u5B8C\u6210\u6DF1\u5EA6\u601D\u8003",
+                state: "working",
+                streamingTextId: reasoningStreamingTextId
+              })
+            });
+          }
+          if (isReasoningSegmentOpen(endTaskId)) {
+            markReasoningBlockClosed(endTaskId, peekReasoningSegmentSeq(endTaskId));
+            noteReasoningBlockClosedForToolCarry(endTaskId, peekReasoningSegmentSeq(endTaskId));
+            closeReasoningSegment(endTaskId);
+            const reasoningSegmentText = peekReasoningSegmentText(endTaskId);
+            outboundQueue.enqueue({
+              taskId: endTaskId,
+              label: "reasoning-end",
+              send: () => sendReasoningTextUpdate({
+                config,
+                sessionId,
+                taskId: endTaskId,
+                messageId: getActiveMessageId(),
+                text: reasoningSegmentText,
+                append: false,
+                isReasoningFinished: true,
+                lastChunk: true,
+                streamingTextId: reasoningStreamingTextId
+              })
+            });
+          }
+        } catch (err) {
+          scopedLog().error(`[REASONING-END] Failed to send reasoning-end marker:`, err);
+        }
+      },
+      onPartialReply: async (payload) => {
+        if (isOutputStale()) return;
+        const text = payload.text ?? "";
+        if (text.length === 0) return;
+        hasSentResponse = true;
+        const prevChain = streamChain;
+        let releaseChain;
+        streamChain = new Promise((resolve2) => {
+          releaseChain = resolve2;
+        });
+        try {
+          await prevChain;
+          if (isOutputStale()) return;
+          const partialTaskId = getActiveTaskId();
+          const partialMessageId = getActiveMessageId();
+          await rotateStreamingTextForBodyStart({
+            config,
+            sessionId,
+            taskId: partialTaskId,
+            messageId: partialMessageId
+          });
+          maybeEnqueueBodyRoundStartCards({
+            config,
+            sessionId,
+            taskId: partialTaskId,
+            messageId: partialMessageId
+          });
+          assembler.onStreamText(text);
+          outboundQueue.enqueue({
+            taskId: partialTaskId,
+            label: "partial",
+            coalesceKey: `partial:${partialTaskId}`,
+            send: () => sendA2AResponse({
+              config,
+              sessionId,
+              taskId: partialTaskId,
+              messageId: partialMessageId,
+              text: assembler.getFullText(),
+              append: false,
+              final: false,
+              log: false
+            })
+          });
+        } catch (err) {
+          scopedLog().error(`[PARTIAL-REPLY] Failed to send:`, err);
+        } finally {
+          releaseChain();
+        }
+      }
+    },
+    markDispatchIdle,
+    startStatusInterval,
+    stopStatusInterval
+  };
+}
+var SYSTEM_NOTICE_MARK, OPENCLAW_FAILURE_RULES, TEMP_FILE_TTL_MS, RUN_CROSS_TASK_LOG_TAG2;
+var init_reply_dispatcher = __esm({
+  "src/dispatch/reply-dispatcher.ts"() {
+    init_runtime();
+    init_formatter();
+    init_config();
+    init_session_manager();
+    init_logger();
+    init_conversation_manager();
+    init_stream_assembler();
+    init_reasoning_state();
+    init_body_text_state();
+    init_reasoning_segment();
+    init_streaming_text_id();
+    init_pending_references();
+    init_pending_files();
+    init_status_card_seq();
+    init_body_round_cards();
+    SYSTEM_NOTICE_MARK = "\u2699\uFE0F";
+    OPENCLAW_FAILURE_RULES = [
+      {
+        // #1 buildContextOverflowRecoveryText：Auto-compaction could not recover this turn...
+        // 前缀 ⚠️ 视 openclaw 实际输出可有可无：⚠ 与变体选择符是两个码点，必须整体用
+        // (?:⚠️)? 做成可选，不能写 ⚠️?（那样 ? 仅作用于变体选择符，⚠ 仍是强制）。
+        // 且真实消息在 this 与 turn 之间可能插入换行（this \r\nturn），
+        // 故用 [\s\S]{0,3} 容忍最多 3 个任意字符（空格/CR/LF）以兼容换行。
+        prefixRe: /^(?:⚠️)?\s*Auto-compaction could not recover this[\s\S]{0,3}turn/i,
+        replacement: "\u26A0\uFE0F \u4E0A\u4E0B\u6587\u5904\u7406\u8FC7\u7A0B\u4E2D\u51FA\u73B0\u5F02\u5E38\uFF0C\u672A\u80FD\u5B8C\u6210\u56DE\u590D\u3002\u5EFA\u8BAE\u6E05\u9664\u5F53\u524D\u4E0A\u4E0B\u6587\u540E\u91CD\u8BD5\u3002"
+      },
+      {
+        // #2 CONTEXT_OVERFLOW_ERROR_MESSAGE：Context overflow: prompt too large for the model...
+        prefixRe: /^(?:⚠️)?\s*Context overflow:\s*prompt too large for the model/i,
+        replacement: "\u26A0\uFE0F \u4E0A\u4E0B\u6587\u957F\u5EA6\u8D85\u51FA\u6A21\u578B\u9650\u5236\uFF0C\u672A\u80FD\u5B8C\u6210\u56DE\u590D\u3002\u5EFA\u8BAE\u6E05\u9664\u5F53\u524D\u4E0A\u4E0B\u6587\uFF08\u65B0\u5EFA/\u91CD\u7F6E\u4F1A\u8BDD\uFF09\u540E\u91CD\u8BD5\u3002"
+      },
+      {
+        // #3 buildPreflightCompactionFailureText：This conversation is too long...
+        prefixRe: /^(?:⚠️)?\s*This conversation is too long,\s*and OpenClaw couldn\'t shorten it\b/i,
+        replacement: "\u26A0\uFE0F \u4E0A\u4E0B\u6587\u5185\u5BB9\u8FC7\u957F\u4E14\u6574\u7406\u5931\u8D25\uFF0C\u672A\u80FD\u5B8C\u6210\u56DE\u590D\u3002\u5EFA\u8BAE\u6E05\u9664\u5F53\u524D\u4E0A\u4E0B\u6587\u540E\u91CD\u8BD5\u3002"
+      }
+    ];
+    TEMP_FILE_TTL_MS = 24 * 60 * 60 * 1e3;
+    RUN_CROSS_TASK_LOG_TAG2 = "[RunCrossTask]";
+  }
+});
+
+// src/legacy/formatter.ts
+function redactMessagePayload2(value, currentKey) {
+  if (value === null || value === void 0) {
+    return value;
+  }
+  if (typeof value === "string") {
+    if (currentKey === void 0 || MESSAGE_CONTENT_KEYS2.has(currentKey)) {
+      return redactSensitiveText(value);
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactMessagePayload2(item, currentKey));
+  }
+  if (typeof value === "object") {
+    const result = {};
+    for (const key of Object.keys(value)) {
+      result[key] = redactMessagePayload2(value[key], key);
+    }
+    return result;
+  }
+  return value;
+}
+function isSuccessfulMemoryFileReadCommand2(command) {
+  return command?.header?.namespace === "AgentEvent" && command?.header?.name === "MemoryQuery" && command?.payload?.action === "MemoryFileRead" && command?.payload?.ans?.ok === true && typeof command?.payload?.ans?.content === "string";
+}
+function redactCommandForTransport2(command) {
+  const redactedCommand = redactMessagePayload2(command);
+  if (isSuccessfulMemoryFileReadCommand2(command)) {
+    redactedCommand.payload.ans.content = command.payload.ans.content;
+  }
+  return redactedCommand;
+}
+function buildTextPreview2(text) {
+  if (typeof text !== "string" || text.length === 0) {
+    return "";
+  }
+  return text.length <= 10 ? text : `${text.slice(0, 5)}***${text.slice(-5)}`;
+}
+async function sendA2AResponse2(params) {
+  const { config, sessionId, taskId, messageId, text, append, final, files, errorCode, errorMessage, log: shouldLog = true } = params;
+  const log = logger.withContext(sessionId, taskId);
+  const bridgedText = text === void 0 ? text : rewriteOutboundApprovalText(sessionId, text);
+  const artifact = {
+    taskId,
+    kind: "artifact-update",
+    append,
+    lastChunk: true,
+    final,
+    artifact: {
+      artifactId: v4_default(),
+      parts: []
+    }
+  };
+  if (bridgedText !== void 0) {
+    artifact.artifact.parts.push({
+      kind: "text",
+      text: bridgedText
+    });
+  }
+  if (files && files.length > 0) {
+    artifact.artifact.parts.push({
+      kind: "data",
+      data: { fileInfo: files }
+    });
+  }
+  artifact.artifact.parts = redactMessagePayload2(artifact.artifact.parts, "parts");
+  const jsonRpcResponse = {
+    jsonrpc: "2.0",
+    id: messageId,
+    result: artifact
+  };
+  if (errorCode !== void 0) {
+    jsonRpcResponse.error = {
+      code: errorCode,
+      message: errorMessage ?? "\u4EFB\u52A1\u6267\u884C\u5F02\u5E38\uFF0C\u8BF7\u91CD\u8BD5"
+    };
+    log.log(`[A2A_RESPONSE] Including error code: ${errorCode}`);
+  }
+  if (shouldLog) {
+    const redactedText = redactSensitiveText(bridgedText ?? "");
+    log.log(`[A2A_RESPONSE] Sending artifact-update, append=${append}, final=${final}, text=${buildTextPreview2(redactedText)}, files=${files?.length ?? 0}, sensitive=${containsSensitiveInfo(bridgedText ?? "")}`);
+  }
+  await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+  if (shouldLog) {
+    log.log(`[A2A_RESPONSE] Message sent successfully`);
+  }
+}
+async function sendReasoningTextUpdate2(params) {
+  const { config, sessionId, taskId, messageId, text, append = true } = params;
+  const log = logger.withContext(sessionId, taskId);
+  const bridgedText = rewriteOutboundApprovalText(sessionId, text);
+  const artifact = {
+    taskId,
+    kind: "artifact-update",
+    append,
+    lastChunk: true,
+    final: false,
+    artifact: {
+      artifactId: v4_default(),
+      parts: [
+        {
+          kind: "reasoningText",
+          reasoningText: bridgedText
+        }
+      ]
+    }
+  };
+  artifact.artifact.parts = redactMessagePayload2(artifact.artifact.parts, "parts");
+  const jsonRpcResponse = {
+    jsonrpc: "2.0",
+    id: messageId,
+    result: artifact
+  };
+  await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+}
+async function sendStatusUpdate2(params) {
+  const { config, sessionId, taskId, messageId, text, state: state2 } = params;
+  const log = logger.withContext(sessionId, taskId);
+  const bridgedText = rewriteOutboundApprovalText(sessionId, text);
+  const redactedText = redactSensitiveText(bridgedText);
+  const statusMessage = redactMessagePayload2({
+    role: "agent",
+    parts: [
+      {
+        kind: "text",
+        text: bridgedText
+      }
+    ]
+  });
+  const statusUpdate = {
+    taskId,
+    kind: "status-update",
+    final: false,
+    // Status updates should not end the stream
+    status: {
+      message: statusMessage,
+      state: state2
+    }
+  };
+  const jsonRpcResponse = {
+    jsonrpc: "2.0",
+    id: messageId,
+    result: statusUpdate
+  };
+  log.log(`[A2A_STATUS] Sending status-update, text="${redactedText}"`);
+  await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+}
+async function sendCommand2(params) {
+  const { config, sessionId, taskId, messageId, toolCallId } = params;
+  const commands = params.commands ?? (params.command ? [params.command] : []);
+  if (commands.length === 0) {
+    throw new Error("sendCommand requires command or commands.");
+  }
+  if (sessionId.startsWith("cron-") || isCronToolCall(toolCallId)) {
+    logger.log(`[CRON-CMD-BLOCKED] sendCommandViaPush disabled, command dropped: ${commands[0]?.header?.name ?? commands[0]?.payload?.executeParam?.intentName ?? "unknown"}`);
+    return;
+  }
+  const log = logger.withContext(sessionId, taskId);
+  const transportCommands = commands.map(redactCommandForTransport2);
+  const artifact = {
+    taskId,
+    kind: "artifact-update",
+    append: false,
+    lastChunk: true,
+    final: params.final ?? false,
+    artifact: {
+      artifactId: v4_default(),
+      parts: [
+        {
+          kind: "data",
+          data: {
+            commands: transportCommands
+          }
+        }
+      ]
+    }
+  };
+  const jsonRpcResponse = {
+    jsonrpc: "2.0",
+    id: messageId,
+    result: artifact
+  };
+  log.log(`[A2A_COMMAND] Sending command`);
+  await sendWsFrame({ config, sessionId, taskId, payload: jsonRpcResponse });
+  log.log(`[A2A_COMMAND] Command sent successfully`);
+}
+var MESSAGE_CONTENT_KEYS2;
+var init_formatter2 = __esm({
+  "src/legacy/formatter.ts"() {
+    init_esm_node();
+    init_outbound_gateway();
+    init_logger();
+    init_sensitive_redactor();
+    init_approval_bridge();
+    init_session_manager();
+    init_config_manager();
+    init_cron_push_map();
+    init_pushid_manager();
+    MESSAGE_CONTENT_KEYS2 = /* @__PURE__ */ new Set(["text", "reasoningText", "content", "message"]);
+  }
+});
+
+// src/legacy/keepalive.ts
+var keepalive_exports = {};
+__export(keepalive_exports, {
+  deliverLegacySubagentFinalResult: () => deliverLegacySubagentFinalResult,
+  startLegacyStatusHeartbeat: () => startLegacyStatusHeartbeat,
+  stopLegacyStatusHeartbeat: () => stopLegacyStatusHeartbeat
+});
+function startLegacyStatusHeartbeat(sessionId, text = LEGACY_DEFAULT_STATUS_TEXT) {
+  const session = getOrCreateSession(sessionId);
+  if (session.statusTimer) {
+    clearInterval(session.statusTimer);
+  }
+  logger.withContext(sessionId, "").log(`[STATUS-HEARTBEAT] Starting legacy heartbeat, text="${text}"`);
+  session.statusTimer = setInterval(() => {
+    const current = getCurrentTask(sessionId);
+    const config = getCachedXYConfig();
+    if (!current || !config) {
+      return;
+    }
+    void sendStatusUpdate2({
+      config,
+      sessionId,
+      taskId: current.taskId,
+      messageId: current.messageId,
+      text,
+      state: "working"
+    }).catch((err) => {
+      logger.withContext(sessionId, current.taskId).error(`Failed to send status update:`, err);
+    });
+  }, LEGACY_STATUS_HEARTBEAT_INTERVAL_MS);
+}
+function legacyHasInflightTurn(sessionId) {
+  const session = getSession(sessionId);
+  return (session?.inflightTurns?.size ?? 0) > 0;
+}
+async function deliverLegacySubagentFinalResult(params) {
+  const { state: state2, reason } = params;
+  const log = logger.withContext(state2.sessionId, state2.taskId);
+  if (state2.finalDeliveryStarted) {
+    log.log(`[SUBAGENT-FINAL] Final delivery already started, skipping duplicate trigger, reason=${reason}`);
+    return;
+  }
+  if (legacyHasInflightTurn(state2.sessionId)) {
+    log.log(`[SUBAGENT-FINAL] Deferring final delivery \u2014 turn still in flight, reason=${reason}`);
+    return;
+  }
+  const config = getCachedXYConfig();
+  if (!config) {
+    log.error(`[SUBAGENT-FINAL] No cached XY config, cannot deliver final result`);
+    return;
+  }
+  state2.finalDeliveryStarted = true;
+  const finalText = state2.completionTexts.length > 0 ? state2.completionTexts.join("\n\n") : (params.text || void 0) ?? "\u5B50\u4EFB\u52A1\u5DF2\u5B8C\u6210";
+  setSessionState(state2.sessionId, "completing");
+  const effectiveTaskId = getCurrentTaskId(state2.sessionId) ?? state2.taskId;
+  const effectiveMessageId = getCurrentMessageId(state2.sessionId) ?? state2.messageId;
+  const terminalFrameDelayMs = config.terminalFrameDelayMs ?? 0;
+  const session = getSession(state2.sessionId);
+  const sendCompletedStatus = () => sendStatusUpdate2({
+    config,
+    sessionId: state2.sessionId,
+    taskId: effectiveTaskId,
+    messageId: effectiveMessageId,
+    text: "\u4EFB\u52A1\u5904\u7406\u5DF2\u5B8C\u6210~",
+    state: "completed"
+  });
+  const sendFinal = () => sendA2AResponse2({
+    config,
+    sessionId: state2.sessionId,
+    taskId: effectiveTaskId,
+    messageId: effectiveMessageId,
+    text: computeBodyDelta(state2.sessionId, finalText),
+    append: true,
+    final: true
+  });
+  if (session) {
+    session.outboundQueue.enqueue({
+      taskId: effectiveTaskId,
+      label: "subagent-terminal-status",
+      delayMs: terminalFrameDelayMs,
+      send: sendCompletedStatus
+    });
+    session.outboundQueue.enqueue({
+      taskId: effectiveTaskId,
+      label: "subagent-final",
+      delayMs: terminalFrameDelayMs,
+      send: sendFinal
+    });
+    await session.outboundQueue.whenIdle();
+  } else {
+    await sendCompletedStatus();
+    await sendFinal();
+  }
+  clearWaitState(state2.sessionId, reason ?? "all-subagent-results-delivered", state2.taskId);
+  releaseDeltaTextTracker(state2.sessionId);
+  completeTask(state2.sessionId);
+  setSessionState(state2.sessionId, "completed");
+  log.log(`[SUBAGENT-FINAL] Subagent final delivered (legacy), reason=${reason}, effectiveTaskId=${effectiveTaskId}`);
+}
+var LEGACY_STATUS_HEARTBEAT_INTERVAL_MS, LEGACY_DEFAULT_STATUS_TEXT, stopLegacyStatusHeartbeat;
+var init_keepalive = __esm({
+  "src/legacy/keepalive.ts"() {
+    init_logger();
+    init_conversation_manager();
+    init_formatter2();
+    init_delta_text_tracker();
+    LEGACY_STATUS_HEARTBEAT_INTERVAL_MS = 30 * 1e3;
+    LEGACY_DEFAULT_STATUS_TEXT = "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019~";
+    stopLegacyStatusHeartbeat = stopStatusHeartbeat;
+  }
+});
+
+// src/legacy/reply-dispatcher.ts
+function isSystemNoticeText2(text) {
+  return text.trimStart().startsWith(SYSTEM_NOTICE_MARK2);
+}
+function rewriteOpenclawFailureText2(text) {
+  if (!text) {
+    return text;
+  }
+  for (const rule of OPENCLAW_FAILURE_RULES2) {
+    if (rule.prefixRe.test(text.trimStart())) {
+      return rule.replacement;
+    }
+  }
+  return text;
+}
+function buildDistributionStatusCommand2(context) {
+  return {
+    header: {
+      namespace: "DistributionInteraction",
+      name: "DistributionStatus"
+    },
+    payload: {
+      agentId: context.agentId,
+      isDistributed: true,
+      networkId: context.networkId,
+      distributionType: "softbus",
+      distributionExecutePolicy: "backgroundExecution"
+    }
+  };
+}
+function buildCrossTaskExecuteResultCommand2(code, message, sentFiles = []) {
+  return {
+    header: {
+      namespace: "DistributionInteraction",
+      name: "CrossTaskExecuteResult"
+    },
+    payload: {
+      code,
+      message,
+      sentFiles
+    }
+  };
+}
+async function sendRunCrossTaskResult2(params) {
+  const { config, sessionId, taskId, messageId, context, resultCode, resultMessage } = params;
+  const sentFiles = Array.isArray(context.sentFiles) ? context.sentFiles : [];
+  const fileCardCount = sentFiles.length;
+  const statusCommand = buildDistributionStatusCommand2(context);
+  const resultCommand = buildCrossTaskExecuteResultCommand2(resultCode, resultMessage, sentFiles);
+  try {
+    await sendCommand2({
+      config,
+      sessionId,
+      taskId,
+      messageId,
+      commands: [statusCommand, resultCommand]
+    });
+    logger.log(`${RUN_CROSS_TASK_LOG_TAG3} sent cross-task result, sessionId=${sessionId}, taskId=${taskId}, code=${resultCode}, fileCardCount=${fileCardCount}, messageLength=${resultMessage.length}`);
+  } finally {
+    clearRunCrossTaskSentFiles(context);
+    logger.log(`${RUN_CROSS_TASK_LOG_TAG3} cleared cross-task sentFiles, sessionId=${sessionId}, taskId=${taskId}, clearedFileCardCount=${fileCardCount}`);
+  }
+}
+function createLegacyReplyDispatcher(params) {
+  const { cfg, runtime, sessionId, taskId, messageId, accountId, onIdleComplete } = params;
+  const currentFallbackTaskId = taskId;
+  const currentFallbackMessageId = messageId;
+  const getActiveTaskId = () => {
+    return getCurrentTaskId(sessionId) ?? currentFallbackTaskId;
+  };
+  const getActiveMessageId = () => {
+    return getCurrentMessageId(sessionId) ?? currentFallbackMessageId;
+  };
+  const scopedLog = () => logger.withContext(sessionId, getActiveTaskId());
+  scopedLog().log(`[DISPATCHER-CREATE] Creating dispatcher`);
+  const core = getXYRuntime();
+  const config = resolveXYConfig(cfg);
+  const prefixContext = {
+    responsePrefix: void 0,
+    responsePrefixContextProvider: void 0,
+    onModelSelected: void 0
+  };
+  let hasSentResponse = false;
+  let finalSent = false;
+  const session = getOrCreateSession(sessionId);
+  const assembler = new StreamAssembler({ accumulateModelSegments: false });
+  session.assembler = assembler;
+  const outboundQueue = session.outboundQueue;
+  const terminalFrameDelayMs = config.terminalFrameDelayMs ?? 0;
+  let streamChain = Promise.resolve();
+  const initialRunCrossTaskContext = getCurrentSessionContext()?.runCrossTaskContext;
+  const getRunCrossTaskContext = () => {
+    return getCurrentSessionContext()?.runCrossTaskContext ?? initialRunCrossTaskContext;
+  };
+  const startStatusInterval = () => {
+    startLegacyStatusHeartbeat(sessionId);
+  };
+  const stopStatusInterval = () => {
+    stopLegacyStatusHeartbeat(sessionId);
+  };
+  const isOutputStale = () => isTurnCanceled(sessionId, taskId) || isTurnSuperseded(sessionId, taskId);
+  const finishIdle = async (preserveHeartbeat) => {
+    if (!preserveHeartbeat) {
+      stopStatusInterval();
+    }
+    if (session.assembler === assembler) {
+      session.assembler = void 0;
+    }
+    await onIdleComplete?.();
+  };
+  const { dispatcher, replyOptions, markDispatchIdle } = core.channel.reply.createReplyDispatcherWithTyping({
+    responsePrefix: prefixContext.responsePrefix,
+    responsePrefixContextProvider: prefixContext.responsePrefixContextProvider,
+    humanDelay: core.channel.reply.resolveHumanDelayConfig(cfg, accountId),
+    onReplyStart: () => {
+      scopedLog().log(`[REPLY-START] Reply started, taskId=${taskId}`);
+    },
+    deliver: async (payload, info) => {
+      if (isOutputStale()) {
+        scopedLog().log(`[DELIVER SKIP] Canceled/superseded turn`);
+        return;
+      }
+      let text = payload.text ?? "";
+      if (payload.isCompactionNotice && text) {
+        text = text.replace(
+          /^🧹 Compacting context \((\d+) messages\) so I can continue without losing history…$/,
+          "\u{1F9F9} \u6B63\u5728\u6574\u7406\u4E0A\u4E0B\u6587\uFF08\u5171 $1 \u6761\u6D88\u606F\uFF09\uFF0C\u8BF7\u7A0D\u5019\u2026"
+        ).replace(/^🧹 Compacting context\.\.\.$/, "\u{1F9F9} \u6B63\u5728\u6574\u7406\u4E0A\u4E0B\u6587\u2026").replace(/^🧹 Compaction complete$/, "\u{1F9F9} \u4E0A\u4E0B\u6587\u6574\u7406\u5B8C\u6210").replace(/^🧹 Compaction incomplete$/, "\u{1F9F9} \u4E0A\u4E0B\u6587\u6574\u7406\u672A\u5B8C\u6210").replace(/^🧹 Compaction not needed$/, "\u{1F9F9} \u65E0\u9700\u6574\u7406\u4E0A\u4E0B\u6587").replace(/^✅ Context compacted.*$/, "\u2705 \u4E0A\u4E0B\u6587\u6574\u7406\u5B8C\u6210\uFF0C\u7EE7\u7EED\u4E4B\u524D\u7684\u5DE5\u4F5C\u3002");
+      }
+      text = rewriteOpenclawFailureText2(text);
+      scopedLog().log(`[DELIVER] kind=${info?.kind}, text.length=${text.length}`);
+      try {
+        if (!text.trim()) {
+          scopedLog().log(`[DELIVER SKIP] Empty text, skipping`);
+          return;
+        }
+        if (info?.kind === "final" && !payload.isCompactionNotice && !isSystemNoticeText2(text)) {
+          assembler.onFinalText(text);
+          scopedLog().log(`[DELIVER] Captured final reply text, length=${text.length}`);
+        }
+        if (hasSentResponse) {
+          scopedLog().log(`[DELIVER SKIP] Already sent via onPartialReply`);
+          return;
+        }
+        hasSentResponse = true;
+        const deliverTaskId = getActiveTaskId();
+        const deliverMessageId = getActiveMessageId();
+        const delta = computeBodyDelta(sessionId, text);
+        if (delta.length > 0) {
+          outboundQueue.enqueue({
+            taskId: deliverTaskId,
+            label: "deliver-fallback",
+            send: () => sendA2AResponse2({
+              config,
+              sessionId,
+              taskId: deliverTaskId,
+              messageId: deliverMessageId,
+              text: delta,
+              append: true,
+              final: false
+            })
+          });
+        }
+      } catch (deliverError) {
+        scopedLog().error(`Failed to deliver message:`, deliverError);
+      }
+    },
+    onError: async (err, info) => {
+      if (isOutputStale()) {
+        scopedLog().log(`[ON-ERROR] Ignoring error from canceled/superseded turn: ${String(err)}`);
+        return;
+      }
+      runtime.error?.(`xy: ${info.kind} reply failed: ${String(err)}`);
+      stopStatusInterval();
+      if (!hasSentResponse) {
+        const errorTaskId = getActiveTaskId();
+        outboundQueue.enqueue({
+          taskId: errorTaskId,
+          label: "error-status",
+          send: () => sendStatusUpdate2({
+            config,
+            sessionId,
+            taskId: errorTaskId,
+            messageId: getActiveMessageId(),
+            text: "\u5904\u7406\u5931\u8D25\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5",
+            state: "failed"
+          })
+        });
+      }
+    },
+    onIdle: async () => {
+      scopedLog().log(`[ON-IDLE] Reply idle, hasSentResponse=${hasSentResponse}, finalSent=${finalSent}`);
+      clearTurnInflight(sessionId, taskId);
+      if (isOutputStale()) {
+        const superseded = isTurnSuperseded(sessionId, taskId);
+        scopedLog().log(`[ON-IDLE] Suppressing terminal output for canceled/superseded turn`);
+        if (!superseded) {
+          setSessionState(sessionId, "canceled");
+        }
+        await finishIdle(superseded);
+        return;
+      }
+      const waitState = getWaitState(sessionId, taskId) ?? getWaitState(sessionId);
+      if (waitState && waitState.deliveredCompletions < waitState.expectedCompletions && !finalSent) {
+        scopedLog().log(
+          `[ON-IDLE] Waiting for subagent completions ${waitState.deliveredCompletions}/${waitState.expectedCompletions}, suppressing final:true`
+        );
+        setSessionState(sessionId, "waiting-subagent");
         const aliveTaskId = getActiveTaskId();
         const aliveMessageId = getActiveMessageId();
         outboundQueue.enqueue({
           taskId: aliveTaskId,
           label: "subagent-waiting-status",
-          send: () => sendStatusUpdate({
+          send: () => sendStatusUpdate2({
             config,
             sessionId,
             taskId: aliveTaskId,
@@ -19020,7 +20930,7 @@ function createXYReplyDispatcher(params) {
           `[ON-IDLE] Subagent completions all arrived (${waitState.deliveredCompletions}/${waitState.expectedCompletions}), deferring final to parent-settled path`
         );
         if (waitState.parentSettled) {
-          await deliverSubagentFinalResult({
+          await deliverLegacySubagentFinalResult({
             state: waitState,
             reason: "parent-settled-completions-ready-at-idle"
           });
@@ -19053,7 +20963,7 @@ function createXYReplyDispatcher(params) {
               outboundQueue.enqueue({
                 taskId: terminalTaskId,
                 label: "cross-task-result",
-                send: () => sendRunCrossTaskResult({
+                send: () => sendRunCrossTaskResult2({
                   config,
                   sessionId,
                   taskId: terminalTaskId,
@@ -19068,7 +20978,7 @@ function createXYReplyDispatcher(params) {
               taskId: terminalTaskId,
               label: "terminal-status",
               delayMs: terminalFrameDelayMs,
-              send: () => sendStatusUpdate({
+              send: () => sendStatusUpdate2({
                 config,
                 sessionId,
                 taskId: terminalTaskId,
@@ -19077,45 +20987,30 @@ function createXYReplyDispatcher(params) {
                 state: "completed"
               })
             });
-            if (fullFinalText) {
-              outboundQueue.enqueue({
+            const finalDelta = fullFinalText ? computeBodyDelta(sessionId, fullFinalText) : "";
+            outboundQueue.enqueue({
+              taskId: terminalTaskId,
+              label: "terminal-final",
+              delayMs: terminalFrameDelayMs,
+              send: () => sendA2AResponse2({
+                config,
+                sessionId,
                 taskId: terminalTaskId,
-                label: "terminal-final",
-                delayMs: terminalFrameDelayMs,
-                send: () => sendA2AResponse({
-                  config,
-                  sessionId,
-                  taskId: terminalTaskId,
-                  messageId: terminalMessageId,
-                  text: fullFinalText,
-                  append: false,
-                  final: true
-                })
-              });
-            } else {
-              outboundQueue.enqueue({
-                taskId: terminalTaskId,
-                label: "terminal-final-empty",
-                delayMs: terminalFrameDelayMs,
-                send: () => sendA2AResponse({
-                  config,
-                  sessionId,
-                  taskId: terminalTaskId,
-                  messageId: terminalMessageId,
-                  text: "",
-                  append: true,
-                  final: true
-                })
-              });
-            }
+                messageId: terminalMessageId,
+                text: finalDelta,
+                append: true,
+                final: true
+              })
+            });
             await outboundQueue.whenIdle();
             finalSent = true;
+            releaseDeltaTextTracker(sessionId);
             if (waitState) {
               clearWaitState(sessionId, "main-final-delivered", taskId);
             }
             setSessionState(sessionId, "completed");
             scopedLog().log(
-              `[ON-IDLE] Sent final response (${fullFinalText ? `append=false, full text length=${fullFinalText.length}` : "append=true, empty stream-end"})`
+              `[ON-IDLE] Sent final response (append=true, finalDelta.length=${finalDelta.length})`
             );
           } catch (err) {
             scopedLog().error(`[ON-IDLE] Failed to send final response:`, err);
@@ -19131,7 +21026,7 @@ function createXYReplyDispatcher(params) {
               outboundQueue.enqueue({
                 taskId: failureTaskId,
                 label: "cross-task-result-failure",
-                send: () => sendRunCrossTaskResult({
+                send: () => sendRunCrossTaskResult2({
                   config,
                   sessionId,
                   taskId: failureTaskId,
@@ -19145,7 +21040,7 @@ function createXYReplyDispatcher(params) {
             outboundQueue.enqueue({
               taskId: failureTaskId,
               label: "failure-status",
-              send: () => sendStatusUpdate({
+              send: () => sendStatusUpdate2({
                 config,
                 sessionId,
                 taskId: failureTaskId,
@@ -19157,13 +21052,13 @@ function createXYReplyDispatcher(params) {
             outboundQueue.enqueue({
               taskId: failureTaskId,
               label: "failure-final",
-              send: () => sendA2AResponse({
+              send: () => sendA2AResponse2({
                 config,
                 sessionId,
                 taskId: failureTaskId,
                 messageId: failureMessageId,
                 text: "\u4EFB\u52A1\u6267\u884C\u5F02\u5E38\uFF0C\u8BF7\u91CD\u8BD5~",
-                append: false,
+                append: true,
                 final: true,
                 errorCode: 99921111,
                 errorMessage: "\u4EFB\u52A1\u6267\u884C\u5F02\u5E38\uFF0C\u8BF7\u91CD\u8BD5"
@@ -19171,6 +21066,7 @@ function createXYReplyDispatcher(params) {
             });
             await outboundQueue.whenIdle();
             finalSent = true;
+            releaseDeltaTextTracker(sessionId);
             setSessionState(sessionId, "failed");
             scopedLog().log(`[ON-IDLE] Sent error response, code=99921111`);
           } catch (err) {
@@ -19209,7 +21105,7 @@ function createXYReplyDispatcher(params) {
             outboundQueue.enqueue({
               taskId: toolTaskId,
               label: "tool-start-status",
-              send: () => sendStatusUpdate({
+              send: () => sendStatusUpdate2({
                 config,
                 sessionId,
                 taskId: toolTaskId,
@@ -19236,7 +21132,7 @@ function createXYReplyDispatcher(params) {
             outboundQueue.enqueue({
               taskId: toolTaskId,
               label: "tool-result-status",
-              send: () => sendStatusUpdate({
+              send: () => sendStatusUpdate2({
                 config,
                 sessionId,
                 taskId: toolTaskId,
@@ -19261,16 +21157,18 @@ function createXYReplyDispatcher(params) {
         try {
           if (text.length > 0) {
             const reasoningTaskId = getActiveTaskId();
+            const delta = computeReasoningDelta(sessionId, text);
+            if (delta.length === 0) return;
             outboundQueue.enqueue({
               taskId: reasoningTaskId,
               label: "reasoning-stream",
-              send: () => sendReasoningTextUpdate({
+              send: () => sendReasoningTextUpdate2({
                 config,
                 sessionId,
                 taskId: reasoningTaskId,
                 messageId: getActiveMessageId(),
-                text,
-                append: false
+                text: delta,
+                append: true
               })
             });
           }
@@ -19294,17 +21192,18 @@ function createXYReplyDispatcher(params) {
           const { fullText } = assembler.onStreamText(text);
           const partialTaskId = getActiveTaskId();
           const partialMessageId = getActiveMessageId();
+          const delta = computeBodyDelta(sessionId, fullText);
+          if (delta.length === 0) return;
           outboundQueue.enqueue({
             taskId: partialTaskId,
             label: "partial",
-            coalesceKey: `partial:${partialTaskId}`,
-            send: () => sendA2AResponse({
+            send: () => sendA2AResponse2({
               config,
               sessionId,
               taskId: partialTaskId,
               messageId: partialMessageId,
-              text: fullText,
-              append: false,
+              text: delta,
+              append: true,
               final: false,
               log: false
             })
@@ -19321,18 +21220,20 @@ function createXYReplyDispatcher(params) {
     stopStatusInterval
   };
 }
-var SYSTEM_NOTICE_MARK, OPENCLAW_FAILURE_RULES, TEMP_FILE_TTL_MS, RUN_CROSS_TASK_LOG_TAG2;
-var init_reply_dispatcher = __esm({
-  "src/dispatch/reply-dispatcher.ts"() {
+var SYSTEM_NOTICE_MARK2, OPENCLAW_FAILURE_RULES2, TEMP_FILE_TTL_MS2, RUN_CROSS_TASK_LOG_TAG3;
+var init_reply_dispatcher2 = __esm({
+  "src/legacy/reply-dispatcher.ts"() {
     init_runtime();
-    init_formatter();
+    init_formatter2();
     init_config();
     init_session_manager();
     init_logger();
     init_conversation_manager();
+    init_keepalive();
     init_stream_assembler();
-    SYSTEM_NOTICE_MARK = "\u2699\uFE0F";
-    OPENCLAW_FAILURE_RULES = [
+    init_delta_text_tracker();
+    SYSTEM_NOTICE_MARK2 = "\u2699\uFE0F";
+    OPENCLAW_FAILURE_RULES2 = [
       {
         // #1 buildContextOverflowRecoveryText：Auto-compaction could not recover this turn...
         // 前缀 ⚠️ 视 openclaw 实际输出可有可无：⚠ 与变体选择符是两个码点，必须整体用
@@ -19353,8 +21254,8 @@ var init_reply_dispatcher = __esm({
         replacement: "\u26A0\uFE0F \u4E0A\u4E0B\u6587\u5185\u5BB9\u8FC7\u957F\u4E14\u6574\u7406\u5931\u8D25\uFF0C\u672A\u80FD\u5B8C\u6210\u56DE\u590D\u3002\u5EFA\u8BAE\u6E05\u9664\u5F53\u524D\u4E0A\u4E0B\u6587\u540E\u91CD\u8BD5\u3002"
       }
     ];
-    TEMP_FILE_TTL_MS = 24 * 60 * 60 * 1e3;
-    RUN_CROSS_TASK_LOG_TAG2 = "[RunCrossTask]";
+    TEMP_FILE_TTL_MS2 = 24 * 60 * 60 * 1e3;
+    RUN_CROSS_TASK_LOG_TAG3 = "[RunCrossTask]";
   }
 });
 
@@ -20168,6 +22069,7 @@ async function handleXYMessage(params) {
     if (appVer) {
       log.log(`[BOT] Extracted app_ver: ${appVer}`);
     }
+    markAppVersion(parsed.taskId, appVer);
     const sdkApiVersion = extractSdkApiVersion(parsed.parts);
     if (sdkApiVersion) {
       log.log(`[BOT] Extracted sdk_api_version: ${sdkApiVersion}`);
@@ -20180,6 +22082,36 @@ async function handleXYMessage(params) {
     const runCrossTaskContext = extractRunCrossTaskContext(parsed.parts);
     const config = resolveXYConfig(cfg);
     cacheXYConfig(config);
+    if (isLegacyAppVersion(parsed.taskId)) {
+      log.log(`[BOT] Sending initial status update (legacy)`);
+      void sendStatusUpdate2({
+        config,
+        sessionId: parsed.sessionId,
+        taskId: parsed.taskId,
+        messageId: parsed.messageId,
+        text: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019~",
+        state: "working"
+      }).catch((err) => {
+        log.error(`Failed to send initial status update (legacy):`, err);
+      });
+    } else {
+      const startSession = getOrCreateSession(parsed.sessionId);
+      const startTaskId = parsed.taskId;
+      const startMessageId = parsed.messageId;
+      startSession.outboundQueue.enqueue({
+        taskId: startTaskId,
+        label: "task-card-start",
+        send: () => sendDisplayTaskCardData({
+          config,
+          sessionId: parsed.sessionId,
+          taskId: startTaskId,
+          messageId: startMessageId,
+          index: 1,
+          stepName: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D",
+          isFinal: false
+        })
+      });
+    }
     let route = core.channel.routing.resolveAgentRoute({
       cfg,
       channel: "xiaoyi-channel",
@@ -20280,6 +22212,7 @@ async function handleXYMessage(params) {
       log.log(`[BOT] Steer: appended file paths to text`);
     }
     let steerFailReason;
+    let steerWaitKeepAliveTimer;
     if (isUpdate && !requiresNewTurn && route.sessionKey) {
       const previousTaskId = getCurrentTaskId(parsed.sessionId);
       const previousMessageId = getCurrentMessageId(parsed.sessionId);
@@ -20290,6 +22223,11 @@ async function handleXYMessage(params) {
         source: "user"
       });
       if (steerResult.ok) {
+        const steerSession = getSession(parsed.sessionId);
+        if (previousTaskId) {
+          steerSession?.outboundQueue.purge(previousTaskId);
+        }
+        steerSession?.assembler?.cutSegment();
         if (previousTaskId && previousMessageId) {
           try {
             await sendA2AResponse({
@@ -20311,6 +22249,37 @@ async function handleXYMessage(params) {
       }
       steerFailReason = steerResult.reason;
       log.log(`[BOT-STEER] Direct steer failed (${steerFailReason}), waiting for previous turn before re-dispatch`);
+      const sendSteerWaitKeepAlive = async () => {
+        try {
+          if (isLegacyAppVersion(parsed.taskId)) {
+            await sendStatusUpdate2({
+              config,
+              sessionId: parsed.sessionId,
+              taskId: parsed.taskId,
+              messageId: parsed.messageId,
+              text: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019~",
+              state: "working"
+            });
+          } else {
+            await sendDisplayTaskCardData({
+              config,
+              sessionId: parsed.sessionId,
+              taskId: parsed.taskId,
+              messageId: parsed.messageId,
+              index: getCurrentStatusCardSeq(parsed.taskId),
+              stepName: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019",
+              isFinal: false
+            });
+          }
+        } catch (err) {
+          log.error(`[BOT-STEER] Wait keep-alive send failed:`, err);
+        }
+      };
+      void sendSteerWaitKeepAlive();
+      steerWaitKeepAliveTimer = setInterval(() => {
+        void sendSteerWaitKeepAlive();
+      }, STEER_WAIT_KEEPALIVE_INTERVAL_MS);
+      steerWaitKeepAliveTimer.unref?.();
       await waitForPreviousTurnWithTimeoutWarning(params.waitForPreviousTurn, () => {
         log.error(`[BOT-STEER] Previous turn did not settle within ${PREVIOUS_TURN_SETTLE_TIMEOUT_MS}ms; proceeding with fallback dispatch`);
       });
@@ -20318,10 +22287,12 @@ async function handleXYMessage(params) {
     if (requiresNewTurn) {
       const readiness = await waitForFullTurnAdmission(parsed.sessionId, route.sessionKey, params.waitForPreviousTurn, log);
       if (readiness !== "ready") {
+        clearInterval(steerWaitKeepAliveTimer);
         await sendAdmissionFailure(identity, readiness === "busy" ? "\u4E0A\u4E00\u6761\u4EFB\u52A1\u4ECD\u5728\u5904\u7406\u4E2D\uFF0C\u672C\u6B21\u8BF7\u6C42\u6682\u672A\u6267\u884C\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002" : "\u6682\u65F6\u65E0\u6CD5\u786E\u8BA4\u4F1A\u8BDD\u72B6\u6001\uFF0C\u672C\u6B21\u8BF7\u6C42\u6682\u672A\u6267\u884C\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
         return;
       }
     }
+    clearInterval(steerWaitKeepAliveTimer);
     if (modelName && modelName.trim() !== "" && modelName.toLowerCase() !== "none") {
       try {
         const storePath = resolveStorePath();
@@ -20370,6 +22341,7 @@ async function handleXYMessage(params) {
     if (requiresNewTurn || !isUpdate || steerFailReason === "no-active-run" && !hasWaitState(parsed.sessionId)) {
       bindSessionKey(route.sessionKey, parsed.sessionId, parsed.taskId, parsed.messageId);
     }
+    if (isUpdate && steerFailReason) log.log(`[BOT-STEER] Previous turn settled, re-dispatching as a new turn`);
     let dispatchCfg = cfg;
     if (modelCapabilities.supportsNativeImages) {
       dispatchCfg = {
@@ -20452,7 +22424,8 @@ async function handleXYMessage(params) {
       completeTask(parsed.sessionId, superseded ? parsed.taskId : void 0);
       log.log(`[BOT] Cleanup completed`);
     };
-    const { dispatcher, replyOptions, markDispatchIdle, startStatusInterval } = createXYReplyDispatcher({
+    const createDispatcher = isLegacyAppVersion(parsed.taskId) ? createLegacyReplyDispatcher : createXYReplyDispatcher;
+    const { dispatcher, replyOptions, markDispatchIdle, startStatusInterval } = createDispatcher({
       cfg,
       runtime,
       sessionId: parsed.sessionId,
@@ -20491,11 +22464,19 @@ async function handleXYMessage(params) {
         if (pendingWait && !pendingWait.parentSettled) {
           const transition = markParentSettled(parsed.sessionId, pendingWait.taskId);
           if (transition?.shouldFinalize) {
-            const { deliverSubagentFinalResult: deliverSubagentFinalResult2 } = await Promise.resolve().then(() => (init_conversation_manager(), conversation_manager_exports));
-            await deliverSubagentFinalResult2({
-              state: transition.state,
-              reason: "all-subagent-results-delivered-before-parent-settled"
-            });
+            if (isLegacyAppVersion(transition.state.taskId)) {
+              const { deliverLegacySubagentFinalResult: deliverLegacySubagentFinalResult2 } = await Promise.resolve().then(() => (init_keepalive(), keepalive_exports));
+              await deliverLegacySubagentFinalResult2({
+                state: transition.state,
+                reason: "all-subagent-results-delivered-before-parent-settled"
+              });
+            } else {
+              const { deliverSubagentFinalResult: deliverSubagentFinalResult2 } = await Promise.resolve().then(() => (init_conversation_manager(), conversation_manager_exports));
+              await deliverSubagentFinalResult2({
+                state: transition.state,
+                reason: "all-subagent-results-delivered-before-parent-settled"
+              });
+            }
             log.log(`[BOT] Subagent wait complete on parent settled; final response delivered`);
           } else {
             log.log(`[BOT] Subagent wait active, preserving session context for completion`);
@@ -20614,11 +22595,13 @@ function buildXYMediaPayload(mediaList) {
     MediaTypes: mediaTypes.length > 0 ? mediaTypes : void 0
   };
 }
-var PREVIOUS_TURN_SETTLE_TIMEOUT_MS, FULL_TURN_ADMISSION_TIMEOUT_MS;
+var PREVIOUS_TURN_SETTLE_TIMEOUT_MS, STEER_WAIT_KEEPALIVE_INTERVAL_MS, FULL_TURN_ADMISSION_TIMEOUT_MS;
 var init_bot = __esm({
   "src/dispatch/bot.ts"() {
     init_runtime();
     init_reply_dispatcher();
+    init_reply_dispatcher2();
+    init_formatter2();
     init_parser();
     init_file_download();
     init_model_input();
@@ -20634,10 +22617,13 @@ var init_bot = __esm({
     init_runtime_manager();
     init_tool_call_nudge_manager();
     init_steer_service();
+    init_app_version();
+    init_status_card_seq();
     init_conversation_manager();
     init_approval_bridge();
     init_logger();
     PREVIOUS_TURN_SETTLE_TIMEOUT_MS = 7e4;
+    STEER_WAIT_KEEPALIVE_INTERVAL_MS = 1e4;
     FULL_TURN_ADMISSION_TIMEOUT_MS = 3e4;
   }
 });
@@ -20720,7 +22706,7 @@ var init_trigger_handler = __esm({
 });
 
 // src/self-evolution-handler.ts
-import os7 from "os";
+import os6 from "os";
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "fs";
 async function handleSelfEvolutionEvent(context, cfg) {
   try {
@@ -20824,8 +22810,9 @@ async function handleSelfEvolutionStateGetEvent(context, cfg, runtime, wsManager
       result: {
         taskId,
         kind: "artifact-update",
+        isNew: true,
         append: false,
-        lastChunk: true,
+        lastChunk: false,
         final: true,
         artifact: {
           artifactId: v4_default(),
@@ -20843,11 +22830,10 @@ async function handleSelfEvolutionStateGetEvent(context, cfg, runtime, wsManager
       agentId: cfg.agentId,
       sessionId,
       taskId,
-      msgDetail: JSON.stringify({ ...jsonRpcResponse, hostname: os7.hostname() })
+      msgDetail: JSON.stringify({ ...jsonRpcResponse, hostname: os6.hostname() })
     };
-    logger.log(`[A2A_COMMAND] Sending A2A command, taskId: ${taskId}`);
     await wsManager.sendMessage(sessionId, outboundMessage);
-    logger.log(`[SELF_EVOLUTION_GET] command sent successfully`);
+    logger.log(`[SELF_EVOLUTION_GET] command sent successfully, taskId: ${taskId}`);
   } catch (err) {
     logger.error("[SELF_EVOLUTION_GET] failed to handle event:", err);
   }
@@ -20920,7 +22906,7 @@ var init_login_token_handler = __esm({
 // src/cron-query-handler.ts
 import { callGatewayTool as callGatewayTool2 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import fsp2 from "node:fs/promises";
-import os8 from "node:os";
+import os7 from "node:os";
 import path13 from "node:path";
 function isRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -21469,7 +23455,7 @@ var init_cron_query_handler = __esm({
     init_config_manager();
     init_cron_push_map();
     init_logger();
-    ROOT_DIR = path13.join(os8.homedir(), ".openclaw");
+    ROOT_DIR = path13.join(os7.homedir(), ".openclaw");
     LEGACY_CRON_RUNS_DIR = path13.join(ROOT_DIR, "cron", "runs");
     GATEWAY_TIMEOUT_MS = 6e4;
     MAX_LIST_BODY_BYTES = 55e3;
@@ -21484,7 +23470,7 @@ var init_cron_query_handler = __esm({
 });
 
 // src/memory-query-handler.ts
-import * as os9 from "os";
+import * as os8 from "os";
 import * as path14 from "path";
 import {
   existsSync as existsSync4,
@@ -21499,14 +23485,14 @@ import {
 import { randomUUID as randomUUID6 } from "crypto";
 function resolveXiaoyiRuntimePath() {
   try {
-    const fs28 = __require("fs");
-    fs28.accessSync(XIAOYIRUNTIME_PATH_PRIMARY, fs28.constants.W_OK);
+    const fs29 = __require("fs");
+    fs29.accessSync(XIAOYIRUNTIME_PATH_PRIMARY, fs29.constants.W_OK);
     return XIAOYIRUNTIME_PATH_PRIMARY;
   } catch {
     try {
-      const fs28 = __require("fs");
+      const fs29 = __require("fs");
       const dir = __require("path").dirname(XIAOYIRUNTIME_PATH_PRIMARY);
-      fs28.mkdirSync(dir, { recursive: true });
+      fs29.mkdirSync(dir, { recursive: true });
       return XIAOYIRUNTIME_PATH_PRIMARY;
     } catch {
     }
@@ -21766,11 +23752,11 @@ function handleMemoryStateGet() {
   return { memoryState: false };
 }
 function handleUserMdQuery() {
-  const filePath = path14.join(os9.homedir(), ".openclaw", "workspace", "USER.md");
+  const filePath = path14.join(os8.homedir(), ".openclaw", "workspace", "USER.md");
   return readMdFile(filePath);
 }
 function handleMemoryMdQuery() {
-  const filePath = path14.join(os9.homedir(), ".openclaw", "workspace", "MEMORY.md");
+  const filePath = path14.join(os8.homedir(), ".openclaw", "workspace", "MEMORY.md");
   return readMdFile(filePath);
 }
 function readMdFile(filePath) {
@@ -21869,7 +23855,7 @@ var init_memory_query_handler = __esm({
     init_config();
     init_logger();
     XIAOYIRUNTIME_PATH_PRIMARY = "/home/sandbox/.openclaw/.xiaoyiruntime";
-    XIAOYIRUNTIME_PATH_FALLBACK = `${os9.homedir()}/.openclaw/.xiaoyiruntime`;
+    XIAOYIRUNTIME_PATH_FALLBACK = `${os8.homedir()}/.openclaw/.xiaoyiruntime`;
     MEMORY_STATE_KEY = "MEMORYSTATE";
     MEMORY_FILE_ROOT = "/home/sandbox/.openclaw/workspace/memory/celia_memory";
     MemoryFileError = class extends Error {
@@ -21880,7 +23866,7 @@ var init_memory_query_handler = __esm({
       }
       errorCode;
     };
-    MEMORY_LOG_PATH = path14.join(os9.homedir(), ".openclaw", ".memory.log");
+    MEMORY_LOG_PATH = path14.join(os8.homedir(), ".openclaw", ".memory.log");
     MEMORY_HISTORY_DAYS = 7;
     MEMORY_RETENTION_DAYS = 30;
     MEMORY_HISTORY_MAX_ENTRIES = 100;
@@ -21928,6 +23914,172 @@ var init_update_task_conv_id_handler = __esm({
     init_config();
     init_cron_conv_map();
     init_logger();
+  }
+});
+
+// src/agent-topic-delete-handler.ts
+import fs18 from "node:fs";
+import os9 from "node:os";
+import path15 from "node:path";
+import {
+  callGatewayTool as callGatewayTool3,
+  resolveActiveEmbeddedRunSessionId as resolveActiveEmbeddedRunSessionId3
+} from "openclaw/plugin-sdk/agent-harness-runtime";
+function validateTopicDeleteConvId(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed === "." || trimmed === ".." || trimmed.includes("/") || trimmed.includes("\\")) {
+    return null;
+  }
+  for (const ch of trimmed) {
+    const code = ch.charCodeAt(0);
+    if (code <= 31 || code === 127) return null;
+  }
+  return trimmed;
+}
+function deleteSessionFilesByConvId(convId, sessionsDir) {
+  const deleted = [];
+  let entries;
+  try {
+    entries = fs18.readdirSync(sessionsDir, { withFileTypes: true });
+  } catch {
+    return deleted;
+  }
+  const prefix = `${convId}.`;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (entry.name !== convId && !entry.name.startsWith(prefix)) continue;
+    const filePath = path15.join(sessionsDir, entry.name);
+    try {
+      fs18.rmSync(filePath, { force: true });
+      deleted.push(filePath);
+    } catch (err) {
+      logger.error(`[TOPIC-DELETE] Failed to delete session file ${filePath}:`, err);
+    }
+  }
+  return deleted;
+}
+function deleteFileOnDisk(filePath) {
+  try {
+    fs18.rmSync(filePath, { force: true });
+    return true;
+  } catch (err) {
+    logger.error(`[TOPIC-DELETE] Failed to delete archived transcript ${filePath}:`, err);
+    return false;
+  }
+}
+async function handleAgentTopicDeleteEvent(context, cfg, accountId) {
+  const sessionId = context?.sessionId ?? "";
+  const taskId = context?.taskId ?? sessionId;
+  const messageId = context?.messageId ?? "";
+  const log = logger.withContext(sessionId, taskId);
+  const rawConvId = context?.conv_id ?? context?.convId;
+  const convId = validateTopicDeleteConvId(rawConvId);
+  log.log(`[TOPIC-DELETE] Received event: conv_id=${convId ?? "(invalid)"}`);
+  let deleted = false;
+  let wasRunning = false;
+  const archived = [];
+  let error;
+  if (!convId) {
+    error = "invalid payload: missing or invalid conv_id";
+    log.error(`[TOPIC-DELETE] ${error}, raw=${typeof rawConvId === "string" ? rawConvId.slice(0, 128) : typeof rawConvId}`);
+  } else {
+    try {
+      const core = getXYRuntime();
+      const route = core.channel.routing.resolveAgentRoute({
+        cfg,
+        channel: "xiaoyi-channel",
+        accountId: accountId ?? "default",
+        peer: { kind: "direct", id: convId }
+      });
+      const sessionKey = route.sessionKey;
+      const agentId = route.agentId ?? "main";
+      log.log(`[TOPIC-DELETE] Resolved route: sessionKey=${sessionKey}, agentId=${agentId}`);
+      try {
+        wasRunning = hasActiveTask(convId) || !!resolveActiveEmbeddedRunSessionId3(sessionKey);
+      } catch {
+      }
+      const gatewayResult = await callGatewayTool3(
+        "sessions.delete",
+        { timeoutMs: GATEWAY_TIMEOUT_MS2 },
+        { key: sessionKey, deleteTranscript: true }
+      );
+      deleted = gatewayResult?.deleted === true;
+      if (Array.isArray(gatewayResult?.archived)) {
+        for (const p of gatewayResult.archived) {
+          if (typeof p !== "string" || !p) continue;
+          if (deleteFileOnDisk(p) && !archived.includes(p)) archived.push(p);
+        }
+      }
+      log.log(
+        `[TOPIC-DELETE] sessions.delete done: deleted=${deleted}, gatewayArchivedPurged=${archived.length}`
+      );
+      const sessionsDir = path15.join(os9.homedir(), ".openclaw", "agents", agentId, "sessions");
+      const fileDeleted = deleteSessionFilesByConvId(convId, sessionsDir);
+      for (const p of fileDeleted) {
+        if (!archived.includes(p)) archived.push(p);
+      }
+      if (fileDeleted.length > 0) {
+        log.log(`[TOPIC-DELETE] Deleted ${fileDeleted.length} session file(s) under ${sessionsDir}`);
+        if (!deleted) deleted = true;
+      }
+      try {
+        const currentTaskId = getCurrentTaskId(convId);
+        if (currentTaskId) {
+          clearTurnInflight(convId, currentTaskId);
+        }
+        while (clearWaitState(convId, "topic-delete")) {
+        }
+        completeTask(convId);
+        clearPendingApproval(convId);
+        log.log(`[TOPIC-DELETE] Local conversation state cleaned for conv_id=${convId}`);
+      } catch (cleanupErr) {
+        log.error(`[TOPIC-DELETE] Failed to clean local conversation state:`, cleanupErr);
+      }
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+      log.error(`[TOPIC-DELETE] Delete failed for conv_id=${convId}:`, err);
+    }
+  }
+  const status = !error;
+  const ans = {
+    conv_id: convId ?? (typeof rawConvId === "string" ? rawConvId : null),
+    deleted,
+    wasRunning,
+    archived
+  };
+  if (error) ans.error = error;
+  if (cfg && sessionId && taskId && messageId) {
+    try {
+      const config = resolveXYConfig(cfg);
+      const command = {
+        header: context?.header && typeof context.header === "object" ? context.header : { namespace: "AgentEvent", name: "AgentTopicDelete" },
+        payload: {
+          action: "delete",
+          status,
+          ans
+        }
+      };
+      await sendCommand({ config, sessionId, taskId, messageId, command, final: true });
+      log.log(`[TOPIC-DELETE] Sent response via sendCommand, status=${status}, deleted=${deleted}`);
+    } catch (sendErr) {
+      log.error(`[TOPIC-DELETE] Failed to send response via sendCommand:`, sendErr);
+    }
+  } else {
+    log.warn(`[TOPIC-DELETE] Missing cfg/sessionId/taskId/messageId, skipping sendCommand`);
+  }
+}
+var GATEWAY_TIMEOUT_MS2;
+var init_agent_topic_delete_handler = __esm({
+  "src/agent-topic-delete-handler.ts"() {
+    init_formatter();
+    init_config();
+    init_runtime();
+    init_conversation_manager();
+    init_approval_bridge();
+    init_logger();
+    GATEWAY_TIMEOUT_MS2 = 25e3;
   }
 });
 
@@ -22143,6 +24295,12 @@ async function monitorXYProvider(opts = {}) {
         logger.error(`[MONITOR] Failed to handle update-task-conv-id-event:`, err);
       });
     };
+    const agentTopicDeleteEventHandler = (context) => {
+      logger.log(`[MONITOR] Received agent-topic-delete-event, dispatching to handler...`);
+      handleAgentTopicDeleteEvent(context, cfg, accountId).catch((err) => {
+        logger.error(`[MONITOR] Failed to handle agent-topic-delete-event:`, err);
+      });
+    };
     const cleanup = () => {
       stopped = true;
       logger.log("XY gateway: cleaning up...");
@@ -22164,6 +24322,7 @@ async function monitorXYProvider(opts = {}) {
       wsManager.off("cron-query-event", cronQueryEventHandler);
       wsManager.off("memory-query-event", memoryQueryEventHandler);
       wsManager.off("update-task-conv-id-event", updateTaskConvIdEventHandler);
+      wsManager.off("agent-topic-delete-event", agentTopicDeleteEventHandler);
       wsManager.disconnect();
       removeXYWebSocketManager(account);
       loggedServers.clear();
@@ -22181,7 +24340,7 @@ async function monitorXYProvider(opts = {}) {
         const activeBindings = listActiveTaskBindings();
         if (activeBindings.length > 0) {
           const config = resolveXYConfig(cfg);
-          const notificationText = "Gateway\u5373\u5C06\u91CD\u542F\uFF0C\u91CD\u542F\u671F\u95F4\u53EF\u80FD\u77ED\u6682\u51FA\u73B0\u201C\u73AF\u5883\u5F02\u5E38\u201D\u63D0\u793A\uFF0C\u8BF7\u7A0D\u5019\u5E76\u8010\u5FC3\u91CD\u8BD5~";
+          const notificationText = "Gateway\u5373\u5C06\u91CD\u542F\uFF0C\u91CD\u542F\u671F\u95F4\u53EF\u80FD\u77ED\u6682\u51FA\u73B0\u201C\u73AF\u5883\u5F02\u5E38\u201D\u63D0\u793A\uFF0C\u8BF7\u7A0D\u5019\u5E76\u8010\u5FC3\u91CD\u8BD5";
           logger.log(`[MONITOR] Sending restart notifications to ${activeBindings.length} active session(s)`);
           const sendPromises = activeBindings.map(
             (binding) => sendA2AResponse({
@@ -22225,6 +24384,7 @@ async function monitorXYProvider(opts = {}) {
     wsManager.on("cron-query-event", cronQueryEventHandler);
     wsManager.on("memory-query-event", memoryQueryEventHandler);
     wsManager.on("update-task-conv-id-event", updateTaskConvIdEventHandler);
+    wsManager.on("agent-topic-delete-event", agentTopicDeleteEventHandler);
     logger.log("Starting periodic health check (every 6 hours)...");
     healthCheckInterval = setInterval(() => {
       logger.log("[HEALTH CHECK] Periodic WebSocket diagnostics...");
@@ -22259,6 +24419,7 @@ var init_monitor = __esm({
     init_cron_query_handler();
     init_memory_query_handler();
     init_update_task_conv_id_handler();
+    init_agent_topic_delete_handler();
     init_reply_dispatcher();
     init_logger();
   }
@@ -24243,6 +26404,10 @@ init_outbound_gateway();
 init_session_manager();
 init_conversation_manager();
 init_pushdata_manager();
+init_reasoning_state();
+init_status_card_seq();
+init_streaming_text_id();
+init_app_version();
 init_logger();
 var DEFAULT_PUSH_MARKER = "default";
 var FILE_TYPE_TO_MIME_TYPE = {
@@ -24431,9 +26596,14 @@ var xyOutbound = {
       id: taskId,
       result: {
         kind: "artifact-update",
+        isNew: !isLegacyAppVersion(taskId),
         append: true,
         lastChunk: false,
         final: false,
+        taskUniqId: taskId,
+        taskUniqIndexId: getCurrentStatusCardSeq(taskId),
+        isReasoningFinished: isReasoningFinished(taskId),
+        streamingTextId: getOrCreateStreamingTextId(taskId),
         artifact: {
           artifactId: taskId,
           parts: [
@@ -24548,6 +26718,18 @@ function filterToolsByDevice(tools, deviceType) {
   } else {
     return tools.filter((tool) => !policy.tools.includes(tool.name));
   }
+}
+
+// src/tools/tool-visibility.ts
+init_app_version();
+var STEPINFO_VERSION_GATED_TOOLS = /* @__PURE__ */ new Set(["ask_user"]);
+var ALWAYS_HIDDEN_TOOLS = /* @__PURE__ */ new Set(["ask_user"]);
+function filterToolsByAppVersion(tools, appVer) {
+  return tools.filter((tool) => !ALWAYS_HIDDEN_TOOLS.has(tool.name) && isToolVisibleForAppVersion(tool.name, appVer));
+}
+function isToolVisibleForAppVersion(toolName, appVer) {
+  if (!STEPINFO_VERSION_GATED_TOOLS.has(toolName)) return true;
+  return typeof appVer === "string" && appVer.length > 0 && !isBelowLegacyAppVersion(appVer);
 }
 
 // src/channel.ts
@@ -24760,6 +26942,8 @@ var xiaoyiGuiTool = {
 init_client();
 init_session_manager();
 init_logger();
+init_app_version();
+init_pending_files();
 init_src();
 import os4 from "os";
 import fs9 from "fs/promises";
@@ -24942,55 +27126,71 @@ b. \u64CD\u4F5C\u8D85\u65F6\u65F6\u95F4\u4E3A2\u5206\u949F\uFF08120\u79D2\uFF09\
           }
         }
       }
-      const sentFiles = [];
+      const fileItems = uploadedFiles.map((u) => ({
+        fileName: u.fileName,
+        mimeType: u.mimeType,
+        fileId: u.fileId,
+        fileUrl: u.fileUrl
+      }));
+      const sentFiles = fileItems.map(({ fileName, fileId }) => ({ fileName, fileId }));
       let cachedSentFilesForReturn = [];
-      for (const uploadedFile of uploadedFiles) {
-        const { fileName, fileId, fileUrl, mimeType } = uploadedFile;
-        const agentResponse = {
-          msgType: "agent_response",
-          agentId: config.agentId,
-          sessionId,
-          taskId,
-          msgDetail: JSON.stringify({
-            jsonrpc: "2.0",
-            id: messageId,
-            result: {
-              kind: "artifact-update",
-              append: true,
-              lastChunk: false,
-              final: false,
-              artifact: {
-                artifactId: taskId,
-                parts: [
-                  {
-                    kind: "file",
-                    file: {
-                      name: fileName,
-                      mimeType,
-                      fileId,
-                      fileUrl
+      if (getCurrentSessionContext().runCrossTaskContext) {
+        const sentFileCards = fileItems.map((f3) => ({
+          fileName: f3.fileName,
+          fileId: f3.fileId,
+          mimeType: f3.mimeType
+        }));
+        const cachedSentFiles = appendRunCrossTaskSentFiles(
+          sentFileCards,
+          getCurrentSessionContext().runCrossTaskContext
+        );
+        cachedSentFilesForReturn = cachedSentFiles;
+        logger.log(`[RunCrossTask] cached file cards for cross-task result, count=${sentFileCards.length}, cachedFileCardCount=${cachedSentFiles.length}`);
+      }
+      const deferToTerminalFlush = !isLegacyAppVersion(taskId) && !sessionId.startsWith("cron-") && !_c.isCron && !isCronToolCall(toolCallId);
+      if (deferToTerminalFlush) {
+        appendPendingFiles(taskId, fileItems);
+        logger.log(`[SEND-FILE-TO-USER] Queued ${fileItems.length} file(s) for post-body flush (before references), taskId=${taskId}`);
+      } else {
+        for (const file of fileItems) {
+          const { fileName, fileId, fileUrl, mimeType } = file;
+          const agentResponse = {
+            msgType: "agent_response",
+            agentId: config.agentId,
+            sessionId,
+            taskId,
+            msgDetail: JSON.stringify({
+              jsonrpc: "2.0",
+              id: messageId,
+              result: {
+                kind: "artifact-update",
+                isNew: true,
+                append: true,
+                lastChunk: false,
+                final: false,
+                artifact: {
+                  artifactId: taskId,
+                  parts: [
+                    {
+                      kind: "file",
+                      file: {
+                        name: fileName,
+                        mimeType,
+                        fileId,
+                        fileUrl
+                      }
                     }
-                  }
-                ]
-              }
-            },
-            error: { code: 0 },
-            hostname: os4.hostname()
-          })
-        };
-        logger.log(`[SEND-FILE-TO-USER] EXEC sending, fileName=${fileName}`);
-        await wsManager.sendMessage(sessionId, agentResponse);
-        logger.log(`[SEND-FILE-TO-USER] send ${fileName} file to user success`);
-        if (getCurrentSessionContext().runCrossTaskContext) {
-          const sentFileCard = { fileName, fileId, mimeType };
-          const cachedSentFiles = appendRunCrossTaskSentFiles(
-            [sentFileCard],
-            getCurrentSessionContext().runCrossTaskContext
-          );
-          cachedSentFilesForReturn = cachedSentFiles;
-          logger.log(`[RunCrossTask] cached file card for cross-task result, fileName=${fileName}, cachedFileCardCount=${cachedSentFiles.length}`);
+                  ]
+                }
+              },
+              error: { code: 0 },
+              hostname: os4.hostname()
+            })
+          };
+          logger.log(`[SEND-FILE-TO-USER] EXEC sending, fileName=${fileName}`);
+          await wsManager.sendMessage(sessionId, agentResponse);
+          logger.log(`[SEND-FILE-TO-USER] send ${fileName} file to user success`);
         }
-        sentFiles.push({ fileName, fileId });
       }
       return {
         content: [
@@ -24999,7 +27199,7 @@ b. \u64CD\u4F5C\u8D85\u65F6\u65F6\u95F4\u4E3A2\u5206\u949F\uFF08120\u79D2\uFF09\
             text: JSON.stringify({
               sentFiles,
               count: sentFiles.length,
-              message: `\u6210\u529F\u53D1\u9001 ${sentFiles.length} \u4E2A\u6587\u4EF6\u5230\u7528\u6237\u8BBE\u5907`,
+              message: deferToTerminalFlush ? `\u5DF2\u8BB0\u5F55 ${sentFiles.length} \u4E2A\u6587\u4EF6\uFF0C\u5C06\u5728\u56DE\u590D\u6B63\u6587\u5B8C\u6210\u540E\u7EDF\u4E00\u53D1\u9001\u5230\u7528\u6237\u8BBE\u5907` : `\u6210\u529F\u53D1\u9001 ${sentFiles.length} \u4E2A\u6587\u4EF6\u5230\u7528\u6237\u8BBE\u5907`,
               cachedSentFiles: cachedSentFilesForReturn
             })
           }
@@ -29545,7 +31745,6 @@ b. \u4F7F\u7528\u8BE5\u5DE5\u5177\u4E4B\u524D\u9700\u83B7\u53D6\u5F53\u524D\u771
 
 // src/tools/call-device-tool.ts
 init_client();
-init_formatter();
 init_session_manager();
 var deviceToolRegistry = /* @__PURE__ */ new Map([
   [noteTool.name, noteTool],
@@ -29612,17 +31811,6 @@ var callDeviceTool = {
     const taskId = ctx?.taskId ?? "";
     const messageId = ctx?.messageId ?? "";
     const { toolName, arguments: toolArgs } = params;
-    try {
-      await sendStatusUpdate({
-        config,
-        sessionId,
-        taskId,
-        messageId,
-        text: `\u6B63\u5728\u4F7F\u7528\u5DE5\u5177: ${toolName}...`,
-        state: "working"
-      });
-    } catch (_) {
-    }
     const tool = deviceToolRegistry.get(toolName);
     if (!tool) {
       return {
@@ -29746,10 +31934,13 @@ var getCollectionToolSchemaTool = createSchemaTool({
 
 // src/tools/login-token-tool.ts
 init_esm_node();
-init_client();
 init_session_manager();
 init_logger();
-import os5 from "os";
+init_outbound_gateway();
+init_status_card_seq();
+init_streaming_text_id();
+init_reasoning_state();
+init_app_version();
 import { readFileSync, existsSync as existsSync2 } from "fs";
 var TOKEN_FILE_PATH = "/home/sandbox/.openclaw/.xiaoyitoken.json";
 var POLL_INTERVAL_MS = 5e3;
@@ -29784,38 +31975,34 @@ var loginTokenTool = {
       throw new Error("Missing required parameter: skillName must be a non-empty string");
     }
     const artifactId = v4_default();
-    const artifact = {
-      taskId,
-      kind: "artifact-update",
-      append: false,
-      lastChunk: true,
-      final: false,
-      artifact: {
-        artifactId,
-        parts: [
-          {
-            kind: "getLoginToken",
-            clientId: clientId.trim(),
-            skillName: skillName.trim()
-          }
-        ]
-      }
-    };
-    const jsonRpcResponse = {
+    const payload = {
       jsonrpc: "2.0",
       id: messageId,
-      result: artifact
-    };
-    const wsManager = getCachedXYWebSocketManager();
-    const outboundMessage = {
-      msgType: "agent_response",
-      agentId: config.agentId,
-      sessionId,
-      taskId,
-      msgDetail: JSON.stringify({ ...jsonRpcResponse, hostname: os5.hostname() })
+      result: {
+        taskId,
+        taskUniqId: taskId,
+        taskUniqIndexId: getCurrentStatusCardSeq(taskId),
+        kind: "artifact-update",
+        isNew: !isLegacyAppVersion(taskId),
+        append: false,
+        lastChunk: false,
+        final: false,
+        streamingTextId: peekLastSentStreamingTextId(taskId) ?? getOrCreateStreamingTextId(taskId),
+        isReasoningFinished: isReasoningFinished(taskId),
+        artifact: {
+          artifactId,
+          parts: [
+            {
+              kind: "getLoginToken",
+              clientId: clientId.trim(),
+              skillName: skillName.trim()
+            }
+          ]
+        }
+      }
     };
     logger.log(`[LOGIN_TOKEN] Sending getLoginToken artifact for clientId=${clientId}, skillName=${skillName}`);
-    await wsManager.sendMessage(sessionId, outboundMessage);
+    await sendWsFrame({ config, sessionId, taskId, payload });
     logger.log(`[LOGIN_TOKEN] Artifact sent successfully`);
     const startTime = Date.now();
     return new Promise((resolve2) => {
@@ -30090,7 +32277,7 @@ var displayA2UICardByPathTool = {
           sessionId,
           taskId,
           messageId,
-          text: fullText,
+          text: assembler.getFullText(),
           append: false,
           final: false
         })
@@ -30135,7 +32322,7 @@ init_conversation_manager();
 init_session_manager();
 import fs13 from "fs";
 import path9 from "path";
-import os6 from "os";
+import os5 from "os";
 var RETRYABLE_CODES = /* @__PURE__ */ new Set([
   "RATE_LIMIT",
   "TIMEOUT",
@@ -30224,7 +32411,7 @@ function extractNameFromFrontmatter(content) {
   }
   return null;
 }
-var DEFAULT_SKILL_ROOT = path9.join(os6.homedir(), ".openclaw", "workspace", "skills");
+var DEFAULT_SKILL_ROOT = path9.join(os5.homedir(), ".openclaw", "workspace", "skills");
 var REFRESH_INTERVAL_MS = 3e4;
 var REQUIRED_FIELDS = ["schemaVersion", "bundleName", "toolName", "pluginType", "description", "arguments"];
 var CORE_FIELDS = ["bundleName", "toolName", "toolType", "pluginType", "protocol", "description", "arguments", "deviceCommand"];
@@ -30543,7 +32730,7 @@ function findUnresolvedPlaceholders(obj, prefix) {
   }
   return results;
 }
-var ENV_FILE_PATH = path9.join(os6.homedir(), ".openclaw", ".xiaoyienv");
+var ENV_FILE_PATH = path9.join(os5.homedir(), ".openclaw", ".xiaoyienv");
 var UNIFIED_API_SUFFIX = "/plugin-executor-service-ws/v1/skill-action-executor/query";
 var DEFAULT_TIMEOUT_MS = 3e5;
 var REQUIRED_ENV_VARS = ["SERVICE_URL", "PERSONAL-API-KEY", "PERSONAL-UID"];
@@ -30925,7 +33112,7 @@ async function executeDeviceTool(params, sessionCtx) {
   );
   const unresolved = findUnresolvedPlaceholders(rendered, "payload");
   if (unresolved.length > 0) {
-    const details = unresolved.map(([path22, text]) => `${path22}='${text}'`).join(", ");
+    const details = unresolved.map(([path23, text]) => `${path23}='${text}'`).join(", ");
     throw new InvokeError("INVALID_PARAM", `Template has unfilled slots: ${details}`);
   }
   const ep = rendered.payload?.executeParam;
@@ -31238,6 +33425,8 @@ var invokeTool = {
 // src/tools/xiaoyi-append-reference.ts
 init_formatter();
 init_session_manager();
+init_pending_references();
+init_app_version();
 init_logger();
 var xiaoyiAppendReferenceTool = {
   name: "xiaoyi_append_reference",
@@ -31315,15 +33504,31 @@ var xiaoyiAppendReferenceTool = {
       name: ref.name,
       imageUrl: ref.imageUrl || void 0
     }));
-    logger.log(`[XIAOYI-APPEND-REFERENCE] Sending ${referenceItems.length} reference items`);
-    await sendReference({
-      config,
-      sessionId,
-      taskId,
-      messageId,
-      toolCallId,
-      references: referenceItems
-    });
+    if (isLegacyAppVersion(taskId)) {
+      logger.log(`[XIAOYI-APPEND-REFERENCE] Legacy link, sending ${referenceItems.length} reference items immediately`);
+      await sendReference({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        toolCallId,
+        references: referenceItems
+      });
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              success: true,
+              count: referenceItems.length,
+              message: `\u6210\u529F\u53D1\u9001 ${referenceItems.length} \u6761\u5F15\u7528\u6765\u6E90`
+            })
+          }
+        ]
+      };
+    }
+    appendPendingReferences(taskId, referenceItems);
+    logger.log(`[XIAOYI-APPEND-REFERENCE] Queued ${referenceItems.length} reference items for post-body flush, taskId=${taskId}`);
     return {
       content: [
         {
@@ -31331,11 +33536,250 @@ var xiaoyiAppendReferenceTool = {
           text: JSON.stringify({
             success: true,
             count: referenceItems.length,
-            message: `\u6210\u529F\u53D1\u9001 ${referenceItems.length} \u6761\u5F15\u7528\u6765\u6E90`
+            message: `\u5DF2\u8BB0\u5F55 ${referenceItems.length} \u6761\u5F15\u7528\u6765\u6E90\uFF0C\u5C06\u5728\u56DE\u590D\u6B63\u6587\u5B8C\u6210\u540E\u7EDF\u4E00\u5C55\u793A`
           })
         }
       ]
     };
+  }
+};
+
+// src/tools/ask-user-tool.ts
+init_esm_node();
+init_formatter();
+init_client();
+init_logger();
+init_session_manager();
+var ASK_USER_TIMEOUT_SECONDS = 120;
+var ASK_USER_TIMEOUT_MS = ASK_USER_TIMEOUT_SECONDS * 1e3;
+var ToolInputError9 = class extends Error {
+  status = 400;
+  constructor(message) {
+    super(message);
+    this.name = "ToolInputError";
+  }
+};
+function assertOptionalBoolean(value, field) {
+  if (value !== void 0 && typeof value !== "boolean") {
+    throw new ToolInputError9(`${field} \u5FC5\u987B\u662F\u5E03\u5C14\u503C`);
+  }
+}
+function normalizeQuestions(input) {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new ToolInputError9("questions \u5FC5\u987B\u662F\u975E\u7A7A\u6570\u7EC4");
+  }
+  const questionIds = /* @__PURE__ */ new Set();
+  return input.map((rawQuestion, index) => {
+    if (!rawQuestion || typeof rawQuestion !== "object") {
+      throw new ToolInputError9(`questions[${index}] \u5FC5\u987B\u662F\u5BF9\u8C61`);
+    }
+    if (typeof rawQuestion.question !== "string" || !rawQuestion.question.trim()) {
+      throw new ToolInputError9(`questions[${index}].question \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+    }
+    if (rawQuestion.header !== void 0 && typeof rawQuestion.header !== "string") {
+      throw new ToolInputError9(`questions[${index}].header \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
+    }
+    assertOptionalBoolean(rawQuestion.multi_select, `questions[${index}].multi_select`);
+    const questionId = rawQuestion.question_id ?? `q_${String(index + 1).padStart(3, "0")}`;
+    if (typeof questionId !== "string" || !questionId.trim()) {
+      throw new ToolInputError9(`questions[${index}].question_id \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+    }
+    if (questionIds.has(questionId)) {
+      throw new ToolInputError9(`question_id \u4E0D\u80FD\u91CD\u590D: ${questionId}`);
+    }
+    questionIds.add(questionId);
+    if (!Array.isArray(rawQuestion.options) || rawQuestion.options.length === 0) {
+      throw new ToolInputError9(`questions[${index}].options \u5FC5\u987B\u662F\u975E\u7A7A\u6570\u7EC4`);
+    }
+    const options = rawQuestion.options.map((rawOption, optionIndex) => {
+      if (!rawOption || typeof rawOption !== "object") {
+        throw new ToolInputError9(`questions[${index}].options[${optionIndex}] \u5FC5\u987B\u662F\u5BF9\u8C61`);
+      }
+      if (typeof rawOption.label !== "string" || !rawOption.label.trim()) {
+        throw new ToolInputError9(`questions[${index}].options[${optionIndex}].label \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+      }
+      if (rawOption.description !== void 0 && typeof rawOption.description !== "string") {
+        throw new ToolInputError9(`questions[${index}].options[${optionIndex}].description \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
+      }
+      assertOptionalBoolean(
+        rawOption.recommended,
+        `questions[${index}].options[${optionIndex}].recommended`
+      );
+      return {
+        label: rawOption.label,
+        ...rawOption.description !== void 0 ? { description: rawOption.description } : {},
+        ...rawOption.recommended !== void 0 ? { recommended: rawOption.recommended } : {}
+      };
+    });
+    let tool;
+    if (rawQuestion.tool !== void 0) {
+      const rawTool = rawQuestion.tool;
+      if (!rawTool || typeof rawTool !== "object") {
+        throw new ToolInputError9(`questions[${index}].tool \u5FC5\u987B\u662F\u5BF9\u8C61`);
+      }
+      if (typeof rawTool.tool_name !== "string" || !rawTool.tool_name.trim()) {
+        throw new ToolInputError9(`questions[${index}].tool.tool_name \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
+      }
+      if (!rawTool.tool_args || typeof rawTool.tool_args !== "object" || Array.isArray(rawTool.tool_args)) {
+        throw new ToolInputError9(`questions[${index}].tool.tool_args \u5FC5\u987B\u662F\u5BF9\u8C61`);
+      }
+      tool = {
+        tool_name: rawTool.tool_name,
+        tool_args: rawTool.tool_args
+      };
+    }
+    let textInput;
+    if (rawQuestion.text_input !== void 0) {
+      const rawTextInput = rawQuestion.text_input;
+      if (!rawTextInput || typeof rawTextInput !== "object") {
+        throw new ToolInputError9(`questions[${index}].text_input \u5FC5\u987B\u662F\u5BF9\u8C61`);
+      }
+      if (typeof rawTextInput.enabled !== "boolean") {
+        throw new ToolInputError9(`questions[${index}].text_input.enabled \u5FC5\u987B\u662F\u5E03\u5C14\u503C`);
+      }
+      if (rawTextInput.placeholder !== void 0 && typeof rawTextInput.placeholder !== "string") {
+        throw new ToolInputError9(`questions[${index}].text_input.placeholder \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
+      }
+      assertOptionalBoolean(rawTextInput.required, `questions[${index}].text_input.required`);
+      textInput = {
+        enabled: rawTextInput.enabled,
+        ...rawTextInput.placeholder !== void 0 ? { placeholder: rawTextInput.placeholder } : {},
+        required: rawTextInput.required ?? false
+      };
+    }
+    return {
+      question_id: questionId,
+      ...rawQuestion.header !== void 0 ? { header: rawQuestion.header } : {},
+      question: rawQuestion.question,
+      multi_select: rawQuestion.multi_select ?? false,
+      ...tool ? { tool } : {},
+      options,
+      ...textInput ? { text_input: textInput } : {}
+    };
+  });
+}
+var askUserTool = {
+  name: "ask_user",
+  label: "Ask User",
+  description: `\u5F53\u7F3A\u5C11\u7EE7\u7EED\u5B8C\u6210\u4EFB\u52A1\u6240\u9700\u7684\u4FE1\u606F\uFF0C\u4E14\u5B58\u5728\u82E5\u5E72\u5408\u7406\u9009\u9879\u65F6\uFF0C\u5411\u7528\u6237\u5C55\u793A\u4E00\u4E2A\u6216\u591A\u4E2A\u9009\u62E9\u95EE\u9898\u3002
+\u6BCF\u4E2A\u95EE\u9898\u53EF\u63D0\u4F9B\u9009\u9879\u3001\u662F\u5426\u591A\u9009\u4EE5\u53CA\u81EA\u5B9A\u4E49\u6587\u672C\u8F93\u5165\uFF1B\u5DE5\u5177\u4F1A\u7B49\u5F85\u5E76\u8FD4\u56DE\u7528\u6237\u9009\u62E9\u7684 selected_options\u3001\u81EA\u5B9A\u4E49 custom_text \u6216 user_cancel \u53D6\u6D88\u72B6\u6001\uFF0C\u518D\u6839\u636E\u7ED3\u679C\u7EE7\u7EED\u51B3\u7B56\u3002
+\u4EC5\u5728\u5F53\u524D\u4FE1\u606F\u4E0D\u8DB3\u4EE5\u7EE7\u7EED\u65F6\u8C03\u7528\uFF0C\u4E0D\u8981\u8BE2\u95EE\u4E0A\u4E0B\u6587\u4E2D\u5DF2\u7ECF\u660E\u786E\u7684\u4FE1\u606F\u3002\u7B49\u5F85\u8D85\u65F6\u65F6\u95F4\u4E3A120\u79D2\uFF0C\u8D85\u65F6\u6216\u53D6\u6D88\u540E\u4E0D\u8981\u91CD\u590D\u8C03\u7528\u540C\u4E00\u95EE\u9898\u3002`,
+  parameters: {
+    type: "object",
+    properties: {
+      questions: {
+        type: "array",
+        minItems: 1,
+        description: "\u9700\u8981\u7528\u6237\u56DE\u7B54\u7684\u95EE\u9898\u5217\u8868",
+        items: {
+          type: "object",
+          properties: {
+            question_id: {
+              type: "string",
+              description: "\u95EE\u9898\u552F\u4E00ID\uFF1B\u7701\u7565\u65F6\u6309\u987A\u5E8F\u751F\u6210 q_001\u3001q_002\u2026\u2026"
+            },
+            header: { type: "string", description: "\u95EE\u9898\u5361\u7247\u6807\u9898" },
+            question: { type: "string", description: "\u9700\u8981\u7528\u6237\u56DE\u7B54\u7684\u95EE\u9898" },
+            multi_select: { type: "boolean", description: "\u662F\u5426\u5141\u8BB8\u591A\u9009\uFF0C\u9ED8\u8BA4 false" },
+            tool: {
+              type: "object",
+              description: "\u53EF\u9009\u7684\u654F\u611F\u5DE5\u5177\u53C2\u6570\u7ED1\u5B9A",
+              properties: {
+                tool_name: { type: "string" },
+                tool_args: { type: "object" }
+              },
+              required: ["tool_name", "tool_args"]
+            },
+            options: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                properties: {
+                  label: { type: "string", description: "\u9009\u9879\u5C55\u793A\u6587\u672C" },
+                  description: { type: "string", description: "\u9009\u9879\u8865\u5145\u8BF4\u660E" },
+                  recommended: { type: "boolean", description: "\u662F\u5426\u63A8\u8350\u8BE5\u9009\u9879" }
+                },
+                required: ["label"]
+              }
+            },
+            text_input: {
+              type: "object",
+              description: "\u53EF\u9009\u7684\u81EA\u5B9A\u4E49\u6587\u672C\u8F93\u5165\u914D\u7F6E",
+              properties: {
+                enabled: { type: "boolean" },
+                placeholder: { type: "string" },
+                required: { type: "boolean", description: "\u662F\u5426\u5FC5\u987B\u586B\u5199\uFF0C\u9ED8\u8BA4 false" }
+              },
+              required: ["enabled"]
+            }
+          },
+          required: ["question", "options"]
+        }
+      }
+    },
+    required: ["questions"]
+  },
+  async execute(toolCallId, params) {
+    const context = getCurrentSessionContext();
+    if (!context) {
+      throw new Error("ask_user \u9700\u8981\u6709\u6548\u7684\u7528\u6237\u4F1A\u8BDD\u4E0A\u4E0B\u6587");
+    }
+    if (!isToolVisibleForAppVersion(askUserTool.name, context.appVer)) {
+      throw new Error("\u5F53\u524D\u5BA2\u6237\u7AEF\u7248\u672C\u4E0D\u652F\u6301 ask_user\uFF0C\u8BF7\u76F4\u63A5\u901A\u8FC7\u6587\u5B57\u8BE2\u95EE\u7528\u6237");
+    }
+    const questions = normalizeQuestions(params?.questions);
+    const askUserId = v4_default();
+    const expiresAt = Math.floor(Date.now() / 1e3) + ASK_USER_TIMEOUT_SECONDS;
+    const command = {
+      header: {
+        namespace: "ToolExecute",
+        name: "Invoke"
+      },
+      payload: {
+        source: "ask_user_interrupt",
+        expires_at: expiresAt,
+        ask_user_id: askUserId,
+        questions
+      }
+    };
+    const wsManager = getCachedXYWebSocketManager();
+    return new Promise((resolve2, reject) => {
+      const cleanup = () => {
+        clearTimeout(timeout);
+        wsManager.off("ask-user-response", handler);
+      };
+      const timeout = setTimeout(() => {
+        cleanup();
+        logger.error(`[ASK-USER] \u7B49\u5F85\u7528\u6237\u9009\u62E9\u8D85\u65F6\uFF08${ASK_USER_TIMEOUT_SECONDS}\u79D2\uFF09`, { toolCallId, askUserId });
+        reject(new Error(`\u7B49\u5F85\u7528\u6237\u9009\u62E9\u8D85\u65F6\uFF08${ASK_USER_TIMEOUT_SECONDS}\u79D2\uFF09`));
+      }, ASK_USER_TIMEOUT_MS);
+      const handler = (event) => {
+        if (event?.ask_user_id !== askUserId) return;
+        cleanup();
+        logger.log(`[ASK-USER] \u6536\u5230\u7528\u6237\u53CD\u9988 askUserId=${askUserId} userCancel=${event.user_cancel === true}`);
+        resolve2({
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(event)
+            }
+          ]
+        });
+      };
+      wsManager.on("ask-user-response", handler);
+      sendCommand({
+        config: context.config,
+        sessionId: context.sessionId,
+        taskId: context.taskId,
+        messageId: context.messageId,
+        command,
+        toolCallId
+      }).catch((error) => {
+        cleanup();
+        reject(error);
+      });
+    });
   }
 };
 
@@ -31361,7 +33805,8 @@ var ALL_TOOLS = [
   loginTokenTool,
   agentAsSkillTool,
   invokeTool,
-  xiaoyiAppendReferenceTool
+  xiaoyiAppendReferenceTool,
+  askUserTool
 ];
 var xyPlugin = {
   id: "xiaoyi-channel",
@@ -31401,8 +33846,10 @@ var xyPlugin = {
   agentTools: () => {
     const ctx = getCurrentSessionContext();
     const deviceFiltered = filterToolsByDevice(ALL_TOOLS, ctx?.deviceType);
-    const filtered = ctx?.modelCapabilities?.supportsNativeImages ? deviceFiltered.filter((tool) => tool.name !== "image_reading") : deviceFiltered;
-    logger.log(`[DEVICE-FILTER] deviceType=${ctx?.deviceType ?? "(none)"}, tools: ${ALL_TOOLS.length} \u2192 ${filtered.length} (${filtered.map((t2) => t2.name).join(", ")})`);
+    const versionFiltered = filterToolsByAppVersion(deviceFiltered, ctx?.appVer);
+    const filtered = ctx?.modelCapabilities?.supportsNativeImages ? versionFiltered.filter((tool) => tool.name !== "image_reading") : versionFiltered;
+    logger.log(`[DEVICE-FILTER] deviceType=${ctx?.deviceType ?? "(none)"}, tools: ${ALL_TOOLS.length} \u2192 ${versionFiltered.length}`);
+    logger.log(`[APP-VERSION-FILTER] appVer=${ctx?.appVer ?? "(none)"}, tools: ${versionFiltered.length} \u2192 ${filtered.length} (${filtered.map((t2) => t2.name).join(", ")})`);
     return filtered;
   },
   messaging: {
@@ -31481,12 +33928,12 @@ import https2 from "https";
 import http3 from "http";
 import crypto5 from "crypto";
 import { URL as URL2 } from "url";
-import * as fs19 from "fs";
-import * as path15 from "path";
+import * as fs20 from "fs";
+import * as path16 from "path";
 import { fileURLToPath } from "url";
 
 // src/cspl/config.ts
-import fs18 from "fs";
+import fs19 from "fs";
 
 // src/cspl/constants.ts
 var RESULT_CODE_MAP = {
@@ -31552,7 +33999,7 @@ var DEFAULT_CONFIG = {
 var cachedConfig = null;
 function loadEnvContent() {
   try {
-    return fs18.readFileSync(ENV_FILE_PATH2, "utf-8");
+    return fs19.readFileSync(ENV_FILE_PATH2, "utf-8");
   } catch (error) {
     const err = error;
     throw new Error(`Failed to read environment file. Error: ${err.message}`);
@@ -31572,7 +34019,7 @@ function parseEnvLine(line) {
   return { key, value };
 }
 function readEnvFile2() {
-  if (!fs18.existsSync(ENV_FILE_PATH2)) {
+  if (!fs19.existsSync(ENV_FILE_PATH2)) {
     throw new Error(`Environment file not found.`);
   }
   const envData = loadEnvContent();
@@ -31628,7 +34075,7 @@ function getConfig(api) {
 
 // src/cspl/call_api.ts
 var __filename = fileURLToPath(import.meta.url);
-var __dirname2 = path15.dirname(__filename);
+var __dirname2 = path16.dirname(__filename);
 function buildTraceId(sessionId) {
   const traceId = sessionId ? `${sessionId}_${Date.now()}` : crypto5.randomUUID();
   return traceId.length > MAX_TRACE_ID_LENGTH ? traceId.substring(0, MAX_TRACE_ID_LENGTH) : traceId;
@@ -31733,7 +34180,7 @@ async function callSkillScanApi(url_suffix, payload, api, sessionId) {
   const httpBody = JSON.stringify(payloadWithUid);
   console.log(`TOOL_input headersForCelia: ${JSON.stringify(headersForCelia)}`);
   console.log(`TOOL_input httpBody: ${JSON.stringify(httpBody)}`);
-  const logFile = path15.join(__dirname2, "api_request_log.txt");
+  const logFile = path16.join(__dirname2, "api_request_log.txt");
   const logContent = [
     `==============================`,
     `Timestamp: ${(/* @__PURE__ */ new Date()).toISOString()}`,
@@ -31746,7 +34193,7 @@ async function callSkillScanApi(url_suffix, payload, api, sessionId) {
     JSON.stringify(httpBody, null, 2),
     `==============================`
   ].join("\n");
-  fs19.writeFileSync(logFile, logContent, "utf8");
+  fs20.writeFileSync(logFile, logContent, "utf8");
   api.logger.info(`[ai-security-plugin][skill_scope_hook] Request log written to ${logFile}`);
   return new Promise((resolve2, reject) => {
     const url = config.api.url + url_suffix;
@@ -31769,15 +34216,15 @@ async function callSkillScanApi(url_suffix, payload, api, sessionId) {
 
 // src/cspl/utils.ts
 import crypto6 from "crypto";
-import fs21 from "fs";
-import path17 from "path";
+import fs22 from "fs";
+import path18 from "path";
 import { Buffer as Buffer4 } from "buffer";
 import { execSync } from "child_process";
 import os10 from "os";
 
 // src/cspl/upload_file.ts
-import fs20 from "fs";
-import path16 from "path";
+import fs21 from "fs";
+import path17 from "path";
 import https3 from "https";
 import http4 from "http";
 import { URL as URL3 } from "url";
@@ -31831,7 +34278,7 @@ function httpRequest(url, method, headers, body, timeout) {
 }
 async function invokingOsmsPrepare(filePath, config, fileSha256, fileSize, sessionId) {
   const headers = buildOsmsHeaders(config, sessionId);
-  const fileName = path16.basename(filePath);
+  const fileName = path17.basename(filePath);
   const body = JSON.stringify({
     useEdge: false,
     objectType: TEMPORARY_MATERIAL_PACKAGE,
@@ -31869,7 +34316,7 @@ async function invokingOsmsPrepare(filePath, config, fileSha256, fileSize, sessi
 }
 function readFileAsBytes(filePath) {
   try {
-    return fs20.readFileSync(filePath);
+    return fs21.readFileSync(filePath);
   } catch (error) {
     const err = error;
     throw new Error(`Failed to read file: ${filePath}. Error: ${err.message}`);
@@ -31957,7 +34404,7 @@ async function uploadFileToObsMain(filePath, api, fileHash, sessionId) {
     apiKey: config.apiKey,
     serviceUrl
   };
-  const fileSize = fs20.statSync(filePath).size;
+  const fileSize = fs21.statSync(filePath).size;
   const prepareResponse = await invokingOsmsPrepare(filePath, obsConfig, fileHash, fileSize, sessionId);
   let fileBytes;
   try {
@@ -32117,7 +34564,7 @@ function expandTilde(p) {
 }
 function buildAbsolutePath(filePath, baseDir) {
   const expandedPath = expandTilde(filePath);
-  if (path17.isAbsolute(expandedPath)) {
+  if (path18.isAbsolute(expandedPath)) {
     return expandedPath;
   }
   if (baseDir) {
@@ -32140,7 +34587,7 @@ function calculateContentHash(content) {
 }
 function getFileSizeInKB(filePath) {
   try {
-    const stats = fs21.statSync(filePath);
+    const stats = fs22.statSync(filePath);
     return Math.ceil(stats.size / 1024);
   } catch (error) {
     return 0;
@@ -32240,11 +34687,11 @@ async function handleExecToolInput(event, api, sessionId, taskId) {
     const nonExistingFiles = [];
     let lastResult = null;
     for (const filePath of filePaths) {
-      if (!fs21.existsSync(filePath)) {
+      if (!fs22.existsSync(filePath)) {
         nonExistingFiles.push(filePath);
         continue;
       }
-      const fileContent = fs21.readFileSync(filePath, "utf8");
+      const fileContent = fs22.readFileSync(filePath, "utf8");
       const fileHash = calculateContentHash(fileContent);
       const fileSize = getFileSizeInKB(filePath);
       const obsUrl = await uploadFileToObsMain(filePath, api, fileHash, buildTraceId(sessionId));
@@ -32261,7 +34708,7 @@ async function handleExecToolInput(event, api, sessionId, taskId) {
         interActionID,
         { file: { type: "doc", url: obsUrl, hash: fileHash, size: fileSize, body: bodyContent } }
       );
-      logger.log(`[SENTINEL HOOK] Sending TOOL_INPUT for file: ${path17.basename(filePath)}, body length: ${JSON.stringify(toolInputPayload).length}`);
+      logger.log(`[SENTINEL HOOK] Sending TOOL_INPUT for file: ${path18.basename(filePath)}, body length: ${JSON.stringify(toolInputPayload).length}`);
       try {
         lastResult = await sendToolInputRequest(toolInputPayload, api, sessionId, event.toolCallId);
         if (lastResult.status === "REJECT") {
@@ -32272,7 +34719,7 @@ async function handleExecToolInput(event, api, sessionId, taskId) {
       }
     }
     if (nonExistingFiles.length > 0) {
-      const fileNames = nonExistingFiles.map((f3) => path17.basename(f3)).join(", ");
+      const fileNames = nonExistingFiles.map((f3) => path18.basename(f3)).join(", ");
       logger.log(`[SENTINEL HOOK] Non-existing files: ${fileNames}`);
     }
     return lastResult;
@@ -32312,13 +34759,13 @@ function calculateProjectHash(sourcePath) {
   try {
     const files = walkDirSync(sourcePath);
     for (const file of files.sort()) {
-      const content = fs21.readFileSync(file, "utf8");
+      const content = fs22.readFileSync(file, "utf8");
       hash.update(file);
       hash.update(content);
     }
   } catch {
-    if (fs21.existsSync(sourcePath) && fs21.statSync(sourcePath).isFile()) {
-      const content = fs21.readFileSync(sourcePath, "utf8");
+    if (fs22.existsSync(sourcePath) && fs22.statSync(sourcePath).isFile()) {
+      const content = fs22.readFileSync(sourcePath, "utf8");
       hash.update(content);
     }
   }
@@ -32327,10 +34774,10 @@ function calculateProjectHash(sourcePath) {
 function walkDirSync(dir) {
   const results = [];
   try {
-    const list = fs21.readdirSync(dir);
+    const list = fs22.readdirSync(dir);
     for (const file of list) {
-      const fullPath = path17.join(dir, file);
-      const stat2 = fs21.statSync(fullPath);
+      const fullPath = path18.join(dir, file);
+      const stat2 = fs22.statSync(fullPath);
       if (stat2.isDirectory()) {
         results.push(...walkDirSync(fullPath));
       } else {
@@ -32344,18 +34791,18 @@ function walkDirSync(dir) {
 async function createAndUploadZip(sourcePath, apiConfig, api) {
   const tmpDir = os10.tmpdir();
   const zipName = `skill_${Date.now()}.zip`;
-  const zipPath = path17.join(tmpDir, zipName);
+  const zipPath = path18.join(tmpDir, zipName);
   try {
-    const parentDir = path17.dirname(sourcePath);
-    const baseName = path17.basename(sourcePath);
+    const parentDir = path18.dirname(sourcePath);
+    const baseName = path18.basename(sourcePath);
     execSync(`cd "${parentDir}" && zip -r "${zipPath}" "${baseName}"`, { encoding: "utf8" });
-    const fileHash = calculateContentHash(fs21.readFileSync(zipPath, "utf8"));
+    const fileHash = calculateContentHash(fs22.readFileSync(zipPath, "utf8"));
     const downloadUrl = await uploadFileToObsMain(zipPath, api, fileHash, crypto6.randomBytes(16).toString("hex"));
     return downloadUrl;
   } finally {
     try {
-      if (fs21.existsSync(zipPath)) {
-        fs21.unlinkSync(zipPath);
+      if (fs22.existsSync(zipPath)) {
+        fs22.unlinkSync(zipPath);
       }
     } catch {
     }
@@ -32369,20 +34816,20 @@ function getOriginType(origin) {
 }
 function loadSkillContent(sourcePath) {
   try {
-    if (fs21.statSync(sourcePath).isDirectory()) {
-      const skillMdPath = path17.join(sourcePath, "SKILL.md");
-      if (fs21.existsSync(skillMdPath)) {
-        return fs21.readFileSync(skillMdPath, "utf8");
+    if (fs22.statSync(sourcePath).isDirectory()) {
+      const skillMdPath = path18.join(sourcePath, "SKILL.md");
+      if (fs22.existsSync(skillMdPath)) {
+        return fs22.readFileSync(skillMdPath, "utf8");
       }
-      const files = fs21.readdirSync(sourcePath);
+      const files = fs22.readdirSync(sourcePath);
       for (const file of files) {
         if (file.endsWith(".md")) {
-          return fs21.readFileSync(path17.join(sourcePath, file), "utf8");
+          return fs22.readFileSync(path18.join(sourcePath, file), "utf8");
         }
       }
       return "";
     }
-    return fs21.readFileSync(sourcePath, "utf8");
+    return fs22.readFileSync(sourcePath, "utf8");
   } catch {
     return "";
   }
@@ -32782,19 +35229,19 @@ function registerSelfEvolutionToolResultNudge(api) {
 // src/skill-retriever/tool-search.ts
 init_logger();
 init_session_manager();
-import * as fs23 from "fs";
-import * as path19 from "path";
+import * as fs24 from "fs";
+import * as path20 from "path";
 import * as os12 from "os";
 
 // src/skill-retriever/skill-status.ts
 init_logger();
-import * as fs22 from "fs";
-import * as path18 from "path";
+import * as fs23 from "fs";
+import * as path19 from "path";
 import * as os11 from "os";
 var PLUGIN_LOG_PREFIX = "[skill-retriever]";
 function expandPath(filePath) {
   if (filePath.startsWith("~")) {
-    return path18.join(os11.homedir(), filePath.slice(1).replace(/^\/+/, ""));
+    return path19.join(os11.homedir(), filePath.slice(1).replace(/^\/+/, ""));
   }
   return filePath;
 }
@@ -32829,11 +35276,11 @@ function parseSkillFrontmatter(content) {
   return result;
 }
 function isSkillDisabled(skillPath) {
-  if (!fs22.existsSync(skillPath)) {
+  if (!fs23.existsSync(skillPath)) {
     return false;
   }
   try {
-    const content = fs22.readFileSync(skillPath, "utf-8");
+    const content = fs23.readFileSync(skillPath, "utf-8");
     const frontmatter = parseSkillFrontmatter(content);
     return frontmatter["disable-model-invocation"] === true;
   } catch {
@@ -32845,7 +35292,7 @@ function filterDisabledSkills(candidateTools) {
   const skillsDir = expandPath("~/.openclaw/workspace/skills");
   for (const tool of candidateTools) {
     if (tool.status === "\u5DF2\u5B89\u88C5") {
-      const skillPath = path18.join(skillsDir, tool.skillId, "SKILL.md");
+      const skillPath = path19.join(skillsDir, tool.skillId, "SKILL.md");
       if (isSkillDisabled(skillPath)) {
         const disabledSkill = { ...tool, downloadPath: skillPath };
         disabledSkills.push(disabledSkill);
@@ -32877,7 +35324,7 @@ function extractUserQuery(fullPrompt) {
 }
 function expandPath2(filePath) {
   if (filePath.startsWith("~")) {
-    return path19.join(os12.homedir(), filePath.slice(1).replace(/^\/+/, ""));
+    return path20.join(os12.homedir(), filePath.slice(1).replace(/^\/+/, ""));
   }
   return filePath;
 }
@@ -32885,7 +35332,7 @@ function readEnvFile3(filePath) {
   const expandedPath = expandPath2(filePath);
   const envDict = {};
   try {
-    const content = fs23.readFileSync(expandedPath, "utf-8");
+    const content = fs24.readFileSync(expandedPath, "utf-8");
     for (const line of content.split("\n")) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) {
@@ -32907,11 +35354,11 @@ function getSkillsInDirectory(dirPath) {
   const expandedDir = expandPath2(dirPath);
   const skills = [];
   try {
-    if (fs23.existsSync(expandedDir) && fs23.statSync(expandedDir).isDirectory()) {
-      const entries = fs23.readdirSync(expandedDir);
+    if (fs24.existsSync(expandedDir) && fs24.statSync(expandedDir).isDirectory()) {
+      const entries = fs24.readdirSync(expandedDir);
       for (const entry of entries) {
-        const entryPath = path19.join(expandedDir, entry);
-        if (fs23.statSync(entryPath).isDirectory()) {
+        const entryPath = path20.join(expandedDir, entry);
+        if (fs24.statSync(entryPath).isDirectory()) {
           skills.push(entry);
         }
       }
@@ -33061,8 +35508,8 @@ function formatDynamicSkillsForContext(skills) {
   function compactHomePath(filePath) {
     const home = os12.homedir();
     if (!home) return filePath;
-    const resolvedHome = path19.resolve(home);
-    const prefixes = [resolvedHome.endsWith(path19.sep) ? resolvedHome : resolvedHome + path19.sep];
+    const resolvedHome = path20.resolve(home);
+    const prefixes = [resolvedHome.endsWith(path20.sep) ? resolvedHome : resolvedHome + path20.sep];
     if (resolvedHome.includes("\\") && !resolvedHome.endsWith("\\")) {
       prefixes.push(resolvedHome + "\\");
     }
@@ -33087,8 +35534,8 @@ function formatDynamicSkillsForContext(skills) {
 }
 function readSkillDescription(skillMdPath) {
   try {
-    if (!fs23.existsSync(skillMdPath)) return null;
-    const content = fs23.readFileSync(skillMdPath, "utf-8");
+    if (!fs24.existsSync(skillMdPath)) return null;
+    const content = fs24.readFileSync(skillMdPath, "utf-8");
     const frontmatter = parseSkillFrontmatter(content);
     const desc = frontmatter["description"];
     return typeof desc === "string" && desc.trim() ? desc.trim() : null;
@@ -33099,7 +35546,7 @@ function readSkillDescription(skillMdPath) {
 
 // src/dynamic-skill-trigger.ts
 init_logger();
-import fs24 from "node:fs";
+import fs25 from "node:fs";
 import fsp3 from "node:fs/promises";
 var RUNTIME_FILE2 = "/home/sandbox/.openclaw/.xiaoyiruntime";
 var RUNTIME_KEY = "dynamicSkillTrigger";
@@ -33127,7 +35574,7 @@ var DynamicSkillTriggerManager = class {
   /** 同步读取，用于 hooks 热路径 */
   isEnabledSync() {
     try {
-      const envData = fs24.readFileSync(RUNTIME_FILE2, "utf-8");
+      const envData = fs25.readFileSync(RUNTIME_FILE2, "utf-8");
       return parseEnabledFromEnvText(envData);
     } catch (error) {
       const code = error && typeof error === "object" && "code" in error ? error.code : void 0;
@@ -33156,7 +35603,7 @@ var dynamicSkillTriggerManager = new DynamicSkillTriggerManager();
 // src/skill-retriever/hooks.ts
 init_logger();
 init_runtime();
-import * as fs25 from "fs";
+import * as fs26 from "fs";
 import { randomUUID as randomUUID7 } from "crypto";
 var PLUGIN_LOG_PREFIX3 = "[skill-retriever]";
 var pendingCustomMessages = /* @__PURE__ */ new Map();
@@ -33219,7 +35666,7 @@ function writeCustomMessageToTranscript(params) {
       parentId,
       timestamp: (/* @__PURE__ */ new Date()).toISOString()
     });
-    fs25.appendFileSync(filePath, line + "\n");
+    fs26.appendFileSync(filePath, line + "\n");
     logger.log(`${PLUGIN_LOG_PREFIX3} [TRANSCRIPT] Wrote custom_message to ${filePath}`);
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
@@ -33388,22 +35835,22 @@ function normalizeToolRetrieverConfig(raw) {
 
 // src/tools/hmos-cli.ts
 init_logger();
-import fs26 from "fs";
-import path20 from "path";
+import fs27 from "fs";
+import path21 from "path";
 import os13 from "os";
 init_session_manager();
 init_client();
 init_formatter();
 init_conversation_manager();
-var DEFAULT_SKILL_ROOT2 = path20.join(os13.homedir(), ".openclaw", "workspace", "skills");
+var DEFAULT_SKILL_ROOT2 = path21.join(os13.homedir(), ".openclaw", "workspace", "skills");
 var REFRESH_INTERVAL_MS2 = 3e4;
 var _g8 = globalThis;
 var CACHE_SLOT2 = "__xyCLICache";
 function parseSkillName2(skillDir) {
-  const skillMdPath = path20.join(skillDir, "SKILL.md");
+  const skillMdPath = path21.join(skillDir, "SKILL.md");
   let content;
   try {
-    content = fs26.readFileSync(skillMdPath, "utf-8");
+    content = fs27.readFileSync(skillMdPath, "utf-8");
   } catch {
     return null;
   }
@@ -33463,39 +35910,39 @@ function extractCLINames(content) {
 }
 function scanCLIDirectories(rootDir) {
   const skillClis = /* @__PURE__ */ new Map();
-  if (!fs26.existsSync(rootDir)) {
+  if (!fs27.existsSync(rootDir)) {
     logger.log(`[CLI-CACHE] Skills root not found: ${rootDir}`);
     return skillClis;
   }
   let skillDirs;
   try {
-    skillDirs = fs26.readdirSync(rootDir, { withFileTypes: true });
+    skillDirs = fs27.readdirSync(rootDir, { withFileTypes: true });
   } catch (err) {
     logger.error(`[CLI-CACHE] Failed to read: ${rootDir}`, err);
     return skillClis;
   }
   for (const dirent of skillDirs) {
     if (!dirent.isDirectory() || dirent.name.startsWith(".")) continue;
-    const skillDir = path20.join(rootDir, dirent.name);
+    const skillDir = path21.join(rootDir, dirent.name);
     const skillName = parseSkillName2(skillDir);
     if (!skillName) continue;
-    const skillMdPath = path20.join(skillDir, "SKILL.md");
+    const skillMdPath = path21.join(skillDir, "SKILL.md");
     let mdContent;
     try {
-      mdContent = fs26.readFileSync(skillMdPath, "utf-8");
+      mdContent = fs27.readFileSync(skillMdPath, "utf-8");
     } catch {
       continue;
     }
     const declaredCLINames = extractCLINames(mdContent);
     if (!declaredCLINames) continue;
-    const clisJsonPath = path20.join(skillDir, "references", "clis", "available_clis.json");
-    if (!fs26.existsSync(clisJsonPath)) {
+    const clisJsonPath = path21.join(skillDir, "references", "clis", "available_clis.json");
+    if (!fs27.existsSync(clisJsonPath)) {
       logger.warn(`[CLI-CACHE] Declared metadata.clis but missing ${clisJsonPath}`);
       continue;
     }
     let cliDefs;
     try {
-      const raw = JSON.parse(fs26.readFileSync(clisJsonPath, "utf-8"));
+      const raw = JSON.parse(fs27.readFileSync(clisJsonPath, "utf-8"));
       if (!Array.isArray(raw)) {
         logger.error(`[CLI-CACHE] ${clisJsonPath} is not an array`);
         continue;
@@ -33518,7 +35965,7 @@ function scanCLIDirectories(rootDir) {
       }
       let mtimeMs = 0;
       try {
-        mtimeMs = fs26.statSync(clisJsonPath).mtimeMs;
+        mtimeMs = fs27.statSync(clisJsonPath).mtimeMs;
       } catch {
       }
       entries.push({ cliName: declaredName, definition: match, filePath: clisJsonPath, mtimeMs });
@@ -33534,7 +35981,7 @@ function createCacheState2(rootDir) {
   const skillClis = scanCLIDirectories(rootDir);
   let rootMtimeMs = 0;
   try {
-    rootMtimeMs = fs26.statSync(rootDir).mtimeMs;
+    rootMtimeMs = fs27.statSync(rootDir).mtimeMs;
   } catch {
   }
   return { skillClis, lastScanMs: Date.now(), rootDir, rootMtimeMs };
@@ -33544,7 +35991,7 @@ function maybeRefresh2(state2) {
   if (now - state2.lastScanMs < REFRESH_INTERVAL_MS2) return;
   let currentMtime = 0;
   try {
-    currentMtime = fs26.statSync(state2.rootDir).mtimeMs;
+    currentMtime = fs27.statSync(state2.rootDir).mtimeMs;
   } catch {
     return;
   }
@@ -33590,7 +36037,7 @@ function wrapState2(state2) {
       state2.skillClis = scanCLIDirectories(state2.rootDir);
       state2.lastScanMs = Date.now();
       try {
-        state2.rootMtimeMs = fs26.statSync(state2.rootDir).mtimeMs;
+        state2.rootMtimeMs = fs27.statSync(state2.rootDir).mtimeMs;
       } catch {
         state2.rootMtimeMs = 0;
       }
@@ -33852,19 +36299,355 @@ function registerCLIHook(api) {
   logger.log("[CLI-HOOK] Registered before_tool_call hook for CLI exec");
 }
 
+// src/tool-status-hook.ts
+init_formatter();
+
+// src/tools/step-info-tool.ts
+init_formatter();
+init_conversation_manager();
+init_session_manager();
+init_logger();
+init_app_version();
+var LOG_TAG = "[STEP-INFO]";
+var DISPLAY_BY_TOOL = {
+  // Web
+  web_search: "\u7F51\u9875\u641C\u7D22",
+  x_search: "\u7F51\u9875\u641C\u7D22",
+  web_fetch: "\u7F51\u9875\u641C\u7D22",
+  browser: "\u7F51\u9875\u641C\u7D22",
+  // Command（bash 为 exec 别名）
+  exec: "\u8FD0\u884C\u547D\u4EE4",
+  bash: "\u8FD0\u884C\u547D\u4EE4",
+  process: "\u8FD0\u884C\u547D\u4EE4",
+  code_execution: "\u8FD0\u884C\u547D\u4EE4",
+  // File-create
+  write: "\u6587\u4EF6\u521B\u5EFA",
+  skill_workshop: "\u6587\u4EF6\u521B\u5EFA",
+  save_self_evolution_skill: "\u6587\u4EF6\u521B\u5EFA",
+  // File-edit
+  edit: "\u7F16\u8F91\u6587\u4EF6",
+  apply_patch: "\u7F16\u8F91\u6587\u4EF6",
+  // File-read
+  read: "\u8BFB\u53D6\u6587\u4EF6",
+  // Image
+  image: "\u5206\u6790\u56FE\u7247",
+  image_generate: "\u751F\u6210\u56FE\u7247",
+  // Music / Video
+  music_generate: "\u751F\u6210\u97F3\u4E50",
+  video_generate: "\u751F\u6210\u89C6\u9891",
+  // General 白名单
+  tool_search: "\u4F7F\u7528\u5DE5\u5177",
+  tool_search_code: "\u4F7F\u7528\u5DE5\u5177",
+  tool_describe: "\u4F7F\u7528\u5DE5\u5177",
+  update_plan: "\u4F7F\u7528\u5DE5\u5177",
+  agents_list: "\u4F7F\u7528\u5DE5\u5177",
+  convert_timestamp_to_utc8_time: "\u4F7F\u7528\u5DE5\u5177",
+  view_push_result: "\u4F7F\u7528\u5DE5\u5177",
+  send_file_to_user: "\u4F7F\u7528\u5DE5\u5177",
+  canvas: "\u4F7F\u7528\u5DE5\u5177"
+};
+var TASK_CARD_TOOLS = new Set(
+  Object.keys(DISPLAY_BY_TOOL).filter((t2) => DISPLAY_BY_TOOL[t2] === "\u4F7F\u7528\u5DE5\u5177")
+);
+var TOOL_STATUS_CARD_META = {
+  web_search: { symbolName: "magnifyingglass", text: "\u7F51\u9875\u641C\u7D22" },
+  web_fetch: { symbolName: "pc_ic_tab_index_1", text: "\u7F51\u9875\u6293\u53D6" },
+  subagents: { symbolName: "arrow_triangle_divide", text: "\u542F\u52A8\u5B50\u4EFB\u52A1" },
+  read: { symbolName: "doc_text_badge_magnifyingglass", text: "\u6587\u4EF6\u8BFB\u53D6" },
+  write: { symbolName: "folder_badge_arrow_left", text: "\u6587\u4EF6\u5199\u5165" },
+  edit: { symbolName: "doc_plaintext_and_pencil", text: "\u6587\u4EF6\u7F16\u8F91" },
+  bash: { symbolName: "code_square", text: "\u6267\u884C\u547D\u4EE4" },
+  exec: { symbolName: "wired_projection", text: "\u6267\u884C\u547D\u4EE4" },
+  invoke: { symbolName: "code_1", text: "API\u5DE5\u5177" },
+  upload_file: { symbolName: "electric_install", text: "\u4E0A\u4F20\u5230\u8FDC\u7A0B\u8BBE\u5907" },
+  create_calendar_event: { text: "\u521B\u5EFA\u65E5\u7A0B" },
+  call_phone: { text: "\u62E8\u6253\u7535\u8BDD" },
+  create_alarm: { text: "\u521B\u5EFA\u65E5\u7A0B" },
+  delete_alarm: { text: "\u5220\u9664\u65E5\u7A0B" },
+  image_reading: { text: "\u56FE\u7247\u7406\u89E3" },
+  get_user_location: { text: "\u83B7\u53D6\u4F4D\u7F6E\u4FE1\u606F" },
+  modify_alarm: { text: "\u4FEE\u6539\u95F9\u949F" },
+  modify_note: { text: "\u8FFD\u52A0\u5907\u5FD8\u5F55" },
+  create_note: { text: "\u521B\u5EFA\u5907\u5FD8\u5F55" },
+  query_app_message: { text: "\u83B7\u53D6\u8BBE\u5907\u901A\u77E5" },
+  save_file_to_file_manager: { text: "\u4FDD\u5B58\u6587\u4EF6" },
+  save_media_to_gallery: { text: "\u4FDD\u5B58\u56FE\u7247" },
+  search_alarm: { text: "\u67E5\u627E\u95F9\u949F" },
+  search_calendar_event: { text: "\u67E5\u627E\u65E5\u7A0B" },
+  search_contact: { text: "\u67E5\u627E\u8054\u7CFB\u4EBA" },
+  search_email: { text: "\u67E5\u627E\u90AE\u4EF6" },
+  search_file: { text: "\u67E5\u627E\u6587\u4EF6" },
+  search_message: { text: "\u67E5\u627E\u77ED\u4FE1" },
+  search_notes: { text: "\u67E5\u627E\u5907\u5FD8\u5F55" },
+  search_photo_gallery: { text: "\u67E5\u627E\u56FE\u7247" },
+  send_email: { text: "\u53D1\u9001\u90AE\u4EF6" },
+  send_message: { text: "\u53D1\u9001\u77ED\u4FE1" },
+  add_collection: { text: "\u8BB0\u5165\u516C\u5171\u77E5\u8BC6" },
+  xiaoyi_append_reference: { text: "\u77E5\u8BC6\u641C\u7D22\u5F15\u7528\u5448\u73B0" },
+  query_collection: { text: "\u67E5\u627E\u516C\u5171\u77E5\u8BC6" },
+  delete_collection: { text: "\u5220\u9664\u516C\u5171\u77E5\u8BC6" }
+};
+function extractSkillNameFromPathText(text) {
+  const normalized = text.replace(/\\/g, "/");
+  const m2 = normalized.match(/(?:^|[/\s"';&|])(?:core_)?skills\/([^/'"\s;&|]+)/i);
+  return m2 ? m2[1] : null;
+}
+function extractSkillNameFromMdPath(text) {
+  const normalized = text.replace(/\\/g, "/");
+  const m2 = normalized.match(/(?:core_)?skills\/([^/'"\s;&|]+)\/SKILL\.md/i);
+  return m2 ? m2[1] : null;
+}
+function detectCdIntoSkill(command) {
+  const normalized = command.replace(/\\/g, "/");
+  const cdMatch = normalized.match(/\bcd\s+["']?([^"';&|]+)/i);
+  if (!cdMatch) return null;
+  return extractSkillNameFromPathText(cdMatch[1]);
+}
+function classifyReadPath(path23) {
+  if (typeof path23 !== "string" || path23.trim().length === 0) return null;
+  const skillName = extractSkillNameFromMdPath(path23);
+  if (skillName) return { kind: "skill", skillName };
+  return { kind: "normal" };
+}
+function detectSkillAction(event) {
+  if (event.toolName === "read") {
+    const classified = classifyReadPath(event.params?.path);
+    if (classified?.kind === "skill") return { action: "view", skillName: classified.skillName };
+    return null;
+  }
+  if (event.toolName === "exec") {
+    const command = event.params?.command;
+    if (typeof command !== "string" || command.trim().length === 0) return null;
+    const mdSkillName = extractSkillNameFromMdPath(command);
+    if (mdSkillName) return { action: "view", skillName: mdSkillName };
+    const cdSkillName = detectCdIntoSkill(command);
+    if (cdSkillName) return { action: "use", skillName: cdSkillName };
+    return null;
+  }
+  return null;
+}
+function isSkillMdRead(event) {
+  if (event.toolName !== "read") return false;
+  return classifyReadPath(event.params?.path)?.kind === "skill";
+}
+function extractInProgressPlanSteps(params) {
+  const plan = params?.plan;
+  if (!Array.isArray(plan)) return [];
+  const steps = [];
+  for (const entry of plan) {
+    if (!entry || typeof entry !== "object") continue;
+    const e2 = entry;
+    if (e2.status !== "in_progress") continue;
+    if (typeof e2.step === "string" && e2.step.trim().length > 0) steps.push(e2.step);
+  }
+  return steps;
+}
+function resolveSendContext(event, ctx) {
+  const binding = resolveBySessionKey(ctx.sessionKey ?? "");
+  if (binding) {
+    const cached = getCachedXYConfig();
+    const config = cached ?? null;
+    if (config) {
+      return {
+        config,
+        sessionId: binding.sessionId,
+        taskId: getCurrentTaskId(binding.sessionId) ?? binding.taskId,
+        messageId: getCurrentMessageId(binding.sessionId) ?? binding.messageId
+      };
+    }
+  }
+  const alsCtx = getCurrentSessionContext();
+  if (alsCtx?.sessionId) {
+    return {
+      config: alsCtx.config,
+      sessionId: alsCtx.sessionId,
+      taskId: alsCtx.taskId,
+      messageId: alsCtx.messageId
+    };
+  }
+  const sessionKey = ctx.sessionKey ?? "";
+  const toolCallId = event.toolCallId ?? "";
+  if (sessionKey.includes("cron:") || isCronToolCall(toolCallId)) {
+    const runInfo = getCronToolRunInfo(toolCallId);
+    const cached = getCachedXYConfig();
+    const config = cached ?? null;
+    if (config) {
+      return {
+        config,
+        sessionId: `cron-${(runInfo?.runId ?? toolCallId).replace(/-/g, "")}`,
+        taskId: runInfo?.runId ?? toolCallId,
+        messageId: ""
+      };
+    }
+  }
+  return null;
+}
+async function rotateTextSegmentAtToolBoundary(params) {
+  const streamingTextId = await rotateStreamingTextSegment(params);
+  logger.log(
+    `${LOG_TAG} segment boundary taskId=${params.taskId} streamingTextId=${streamingTextId}`
+  );
+}
+function registerStepInfoHook(api) {
+  api.on("before_tool_call", async (event, ctx) => {
+    try {
+      const sendCtx = resolveSendContext(event, ctx);
+      if (!sendCtx) return;
+      if (isLegacyAppVersion(sendCtx.taskId)) return;
+      const bodyTextSent = isBodyTextProduced(sendCtx.sessionId, sendCtx.taskId);
+      const skillAction = detectSkillAction(event);
+      if (skillAction) {
+        if (bodyTextSent) {
+          logger.log(
+            `${LOG_TAG} body text already sent in current segment, suppressing skill card action=${skillAction.action} skill=${skillAction.skillName}`
+          );
+        } else {
+          const cardText = skillAction.action === "view" ? `\u67E5\u770B\u6280\u80FD ${skillAction.skillName}` : `\u4F7F\u7528\u6280\u80FD ${skillAction.skillName}`;
+          await sendExecuteStatusCard({
+            ...sendCtx,
+            toolCallId: event.toolCallId,
+            text: cardText
+          });
+        }
+      }
+      if (isSkillMdRead(event)) {
+        logger.log(`${LOG_TAG} skip: read skill SKILL.md, tool=${event.toolName}`);
+        return;
+      }
+      const displayName = DISPLAY_BY_TOOL[event.toolName];
+      if (!displayName) return;
+      if (event.toolName === "update_plan") {
+        logger.log(
+          `${LOG_TAG} update_plan \u8C03\u7528\u5165\u53C2 toolCallId=${event.toolCallId ?? ""}:`,
+          event.params
+        );
+      }
+      if (TASK_CARD_TOOLS.has(event.toolName)) {
+        if (event.toolName === "update_plan" && !bodyTextSent) {
+          const planSteps = extractInProgressPlanSteps(event.params);
+          for (const stepText of planSteps) {
+            await sendExecuteStatusCard({
+              ...sendCtx,
+              toolCallId: event.toolCallId,
+              text: stepText
+            });
+          }
+        }
+        return;
+      }
+      await rotateTextSegmentAtToolBoundary({ ...sendCtx });
+      logger.log(`${LOG_TAG} segment boundary at tool_call, tool=${event.toolName} display=${displayName}`);
+    } catch (err) {
+      logger.error(`${LOG_TAG} before_tool_call hook failed:`, err);
+    }
+  });
+  api.on("after_tool_call", async (event, ctx) => {
+    try {
+      if (isSkillMdRead(event)) return;
+      const displayName = DISPLAY_BY_TOOL[event.toolName];
+      if (!displayName) return;
+      const failed = event.error !== void 0 && event.error !== null;
+      const rawResult = failed ? typeof event.error === "string" ? event.error : JSON.stringify(event.error) : event.result;
+      if (event.toolName === "update_plan") {
+        logger.log(
+          `${LOG_TAG} update_plan \u5B9E\u9645\u8F93\u51FA toolCallId=${event.toolCallId ?? ""} success=${!failed}:`,
+          rawResult
+        );
+      }
+      if (TASK_CARD_TOOLS.has(event.toolName)) return;
+      const sendCtx = resolveSendContext(event, ctx);
+      if (!sendCtx) {
+        logger.log(`${LOG_TAG} skip segment boundary: no send context, tool=${event.toolName}`);
+        return;
+      }
+      if (isLegacyAppVersion(sendCtx.taskId)) return;
+      await rotateTextSegmentAtToolBoundary({ ...sendCtx });
+      logger.log(
+        `${LOG_TAG} segment boundary at tool_result, tool=${event.toolName} display=${displayName} success=${!failed}`
+      );
+    } catch (err) {
+      logger.error(`${LOG_TAG} after_tool_call hook failed:`, err);
+    }
+  });
+}
+
+// src/tool-status-hook.ts
+init_app_version();
+init_conversation_manager();
+init_config();
+init_conversation_manager();
+init_logger();
+function resolveActualToolName(event) {
+  if (event.toolName === "call_device_tool") {
+    const inner = event.params?.toolName;
+    if (typeof inner === "string" && inner.length > 0) return inner;
+  }
+  return event.toolName;
+}
+var MAX_PARAMS_PREVIEW_LENGTH = 100;
+function buildStatusCardText(base, event) {
+  const params = event.toolName === "call_device_tool" ? event.params?.arguments : event.params;
+  if (!params || typeof params !== "object") return base;
+  const values = Object.values(params).map((v) => typeof v === "string" ? v : JSON.stringify(v)).filter((v) => typeof v === "string" && v.length > 0);
+  if (values.length === 0) return base;
+  const preview2 = values.join(" ").slice(0, MAX_PARAMS_PREVIEW_LENGTH);
+  return `${base} "${preview2}"`;
+}
+function registerToolStatusHook(api) {
+  const getConfig2 = () => {
+    try {
+      const cached = getCachedXYConfig();
+      if (cached) return cached;
+      return resolveXYConfig(api.config);
+    } catch (err) {
+      logger.error(`[TOOL-STATUS] Failed to resolve channel config:`, err);
+      return null;
+    }
+  };
+  api.on("before_tool_call", async (event, ctx) => {
+    try {
+      const config = getConfig2();
+      if (!config) return;
+      const binding = resolveBySessionKey(ctx.sessionKey ?? "");
+      if (!binding) return;
+      const toolName = resolveActualToolName(event);
+      const taskId = getCurrentTaskId(binding.sessionId) ?? binding.taskId;
+      const messageId = getCurrentMessageId(binding.sessionId) ?? binding.messageId;
+      if (isLegacyAppVersion(taskId)) return;
+      const meta = TOOL_STATUS_CARD_META[toolName];
+      if (!meta) return;
+      if (isBodyTextProduced(binding.sessionId, taskId)) {
+        logger.log(`[TOOL-STATUS] Body text already produced in current segment, suppressing status card for ${toolName}`);
+        return;
+      }
+      await sendExecuteStatusCard({
+        config,
+        sessionId: binding.sessionId,
+        taskId,
+        messageId,
+        toolCallId: event.toolCallId,
+        text: buildStatusCardText(meta.text ?? toolName, event),
+        symbolName: meta.symbolName
+      });
+    } catch (err) {
+      logger.error(`[TOOL-STATUS] before_tool_call status card push failed:`, err);
+    }
+  });
+}
+
 // src/cron-recovery.ts
 init_logger();
 import { createRequire } from "node:module";
-import fs27 from "node:fs";
+import fs28 from "node:fs";
 import fsp4 from "node:fs/promises";
-import path21 from "node:path";
+import path22 from "node:path";
 import os14 from "node:os";
 var nodeRequire = createRequire(import.meta.url);
 var { DatabaseSync } = nodeRequire("node:sqlite");
 var RECOVERY_LOG_TAG = "[CRON-RECOVERY]";
-var ROOT_DIR2 = path21.join(os14.homedir(), ".openclaw");
-var LEGACY_CRON_STORE_PATH = path21.join(ROOT_DIR2, "cron", "jobs.json");
-var STATE_DB_PATH = path21.join(ROOT_DIR2, "state", "openclaw.sqlite");
+var ROOT_DIR2 = path22.join(os14.homedir(), ".openclaw");
+var LEGACY_CRON_STORE_PATH = path22.join(ROOT_DIR2, "cron", "jobs.json");
+var STATE_DB_PATH = path22.join(ROOT_DIR2, "state", "openclaw.sqlite");
 function resolveLegacyCronStatePath(storePath) {
   if (storePath.endsWith(".json")) {
     return storePath.replace(/\.json$/, "-state.json");
@@ -33877,7 +36660,7 @@ async function fileExists(filePath) {
 }
 function fileExistsSync(filePath) {
   try {
-    fs27.accessSync(filePath);
+    fs28.accessSync(filePath);
     return true;
   } catch {
     return false;
@@ -33890,7 +36673,7 @@ async function archiveFile(filePath) {
     archivePath = `${filePath}${MIGRATED_SUFFIX}.${index}`;
   }
   await fsp4.rename(filePath, archivePath).catch(() => void 0);
-  logger.log(`${RECOVERY_LOG_TAG} Archived ${filePath} \u2192 ${path21.basename(archivePath)}`);
+  logger.log(`${RECOVERY_LOG_TAG} Archived ${filePath} \u2192 ${path22.basename(archivePath)}`);
 }
 function parseJsonWithFallback(raw) {
   try {
@@ -34008,7 +36791,7 @@ async function loadLegacyCronStore() {
 }
 function openStateDb() {
   const dbPath = STATE_DB_PATH;
-  const dbDir = path21.dirname(dbPath);
+  const dbDir = path22.dirname(dbPath);
   logger.log(
     `${RECOVERY_LOG_TAG} Attempting to open state database at: ${dbPath}`
   );
@@ -34022,7 +36805,7 @@ function openStateDb() {
     return null;
   }
   try {
-    const stat2 = fs27.statSync(dbPath);
+    const stat2 = fs28.statSync(dbPath);
     logger.log(
       `${RECOVERY_LOG_TAG} State database size: ${stat2.size} bytes, mode: ${stat2.mode.toString(8)}`
     );
@@ -34066,7 +36849,7 @@ function openStateDb() {
   return null;
 }
 function cronStoreKey(storePath) {
-  return path21.resolve(storePath);
+  return path22.resolve(storePath);
 }
 function buildScheduleIdentity(job) {
   const schedule = job.schedule;
@@ -34273,11 +37056,11 @@ async function migrateStore(diags) {
     return false;
   }
   try {
-    const storeStat = fs27.statSync(storePath);
+    const storeStat = fs28.statSync(storePath);
     logger.log(`${RECOVERY_LOG_TAG} Legacy store file size: ${storeStat.size} bytes`);
     const stateExists = await fileExists(statePath);
     if (stateExists) {
-      const stateStat = fs27.statSync(statePath);
+      const stateStat = fs28.statSync(statePath);
       logger.log(`${RECOVERY_LOG_TAG} Legacy state file size: ${stateStat.size} bytes`);
     } else {
       logger.log(`${RECOVERY_LOG_TAG} Legacy state file not found (will use job-embedded state)`);
@@ -34351,7 +37134,7 @@ async function recoverCronState() {
   const dbExists = fileExistsSync(STATE_DB_PATH);
   if (dbExists) {
     try {
-      dbSize = fs27.statSync(STATE_DB_PATH).size;
+      dbSize = fs28.statSync(STATE_DB_PATH).size;
     } catch {
     }
   }
@@ -34395,7 +37178,7 @@ async function recoverCronState() {
 init_logger();
 init_session_manager();
 import { createHash as createHash5 } from "crypto";
-var LOG_TAG = "[CRON-SYNC]";
+var LOG_TAG2 = "[CRON-SYNC]";
 var SYNC_API_SUFFIX = "/fulfillment/v1/claw/scheduled-tasks/sync";
 var SYNC_TIMEOUT_MS = 3e4;
 var SYNCED_ACTIONS = /* @__PURE__ */ new Set([
@@ -34415,7 +37198,7 @@ async function syncScheduledTaskOnCronChanged(event) {
     const jobId = event?.jobId;
     if (!action || !SYNCED_ACTIONS.has(action)) return;
     if (!jobId) {
-      logger.warn(`${LOG_TAG} skip: action=${action} without jobId`);
+      logger.warn(`${LOG_TAG2} skip: action=${action} without jobId`);
       return;
     }
     let config;
@@ -34423,7 +37206,7 @@ async function syncScheduledTaskOnCronChanged(event) {
       config = loadCloudConfig();
     } catch (err) {
       logger.warn(
-        `${LOG_TAG} skip: cloud config unavailable, action=${action} jobId=${jobId}`,
+        `${LOG_TAG2} skip: cloud config unavailable, action=${action} jobId=${jobId}`,
         err instanceof Error ? err.message : String(err)
       );
       return;
@@ -34445,7 +37228,7 @@ async function syncScheduledTaskOnCronChanged(event) {
     };
     if (event.job?.enabled !== void 0) payload.enabled = event.job.enabled;
     if (event.job?.schedule !== void 0) payload.schedule = event.job.schedule;
-    logger.log(`${LOG_TAG} syncing action=${action} jobId=${jobId} traceId=${traceId}`);
+    logger.log(`${LOG_TAG2} syncing action=${action} jobId=${jobId} traceId=${traceId}`);
     const resp = await fetch(url, {
       method: "POST",
       headers,
@@ -34455,22 +37238,22 @@ async function syncScheduledTaskOnCronChanged(event) {
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
       logger.warn(
-        `${LOG_TAG} sync failed: HTTP ${resp.status} action=${action} jobId=${jobId} body=${body.slice(0, 500)}`
+        `${LOG_TAG2} sync failed: HTTP ${resp.status} action=${action} jobId=${jobId} body=${body.slice(0, 500)}`
       );
       return;
     }
-    logger.log(`${LOG_TAG} sync ok: HTTP ${resp.status} action=${action} jobId=${jobId}`);
+    logger.log(`${LOG_TAG2} sync ok: HTTP ${resp.status} action=${action} jobId=${jobId}`);
   } catch (err) {
-    logger.error(`${LOG_TAG} sync error:`, err);
+    logger.error(`${LOG_TAG2} sync error:`, err);
   }
 }
 
-// src/utils/skills-logger.ts
+// src/utils/cron-run-logger.ts
 var import_pino2 = __toESM(require_pino(), 1);
 import { mkdirSync as mkdirSync4, readdirSync as readdirSync3, unlinkSync as unlinkSync3, statSync as statSync4 } from "fs";
 import { join as join6 } from "path";
 var LOG_DIR2 = "/tmp/openclaw";
-var LOG_PREFIX2 = "skills";
+var LOG_PREFIX2 = "cron";
 var MAX_AGE_DAYS2 = 30;
 function getTodayDateStr2() {
   const utc8 = new Date(Date.now() + 8 * 60 * 60 * 1e3);
@@ -34521,21 +37304,142 @@ function checkRotation2() {
     cleanupOldLogs2();
   }
 }
-function writeSkillUsage(skillName) {
-  checkRotation2();
-  const timestamp = formatTimestampUTC82();
-  dest2.write(`|${timestamp}|${skillName}|
+function writeCronRunLog(fields) {
+  try {
+    checkRotation2();
+    const timestamp = formatTimestampUTC82();
+    dest2.write(`|${timestamp}|${JSON.stringify(fields)}
 `);
+  } catch {
+  }
+}
+
+// src/utils/skills-logger.ts
+var import_pino3 = __toESM(require_pino(), 1);
+import { mkdirSync as mkdirSync5, readdirSync as readdirSync4, unlinkSync as unlinkSync4, statSync as statSync5 } from "fs";
+import { join as join7 } from "path";
+var LOG_DIR3 = "/tmp/openclaw";
+var LOG_PREFIX3 = "skills";
+var MAX_AGE_DAYS3 = 30;
+function getTodayDateStr3() {
+  const utc8 = new Date(Date.now() + 8 * 60 * 60 * 1e3);
+  return `${utc8.getUTCFullYear()}${String(utc8.getUTCMonth() + 1).padStart(2, "0")}${String(utc8.getUTCDate()).padStart(2, "0")}`;
+}
+function formatTimestampUTC83() {
+  const utc8 = new Date(Date.now() + 8 * 60 * 60 * 1e3);
+  const y = utc8.getUTCFullYear();
+  const M = String(utc8.getUTCMonth() + 1).padStart(2, "0");
+  const D = String(utc8.getUTCDate()).padStart(2, "0");
+  const h2 = String(utc8.getUTCHours()).padStart(2, "0");
+  const m2 = String(utc8.getUTCMinutes()).padStart(2, "0");
+  const s2 = String(utc8.getUTCSeconds()).padStart(2, "0");
+  return `${y}${M}${D}T${h2}${m2}${s2}`;
+}
+function getLogFilePath3(dateStr) {
+  return join7(LOG_DIR3, `${LOG_PREFIX3}-${dateStr ?? getTodayDateStr3()}.log`);
+}
+try {
+  mkdirSync5(LOG_DIR3, { recursive: true });
+} catch {
+}
+function cleanupOldLogs3() {
+  try {
+    const files = readdirSync4(LOG_DIR3);
+    const cutoff = Date.now() - MAX_AGE_DAYS3 * 24 * 60 * 60 * 1e3;
+    for (const f3 of files) {
+      if (!f3.startsWith(LOG_PREFIX3) || !f3.endsWith(".log")) continue;
+      const fp = join7(LOG_DIR3, f3);
+      try {
+        if (statSync5(fp).mtimeMs < cutoff) unlinkSync4(fp);
+      } catch {
+      }
+    }
+  } catch {
+  }
+}
+cleanupOldLogs3();
+var cleanupTimer3 = setInterval(cleanupOldLogs3, 6 * 60 * 60 * 1e3);
+cleanupTimer3.unref?.();
+var currentDate3 = getTodayDateStr3();
+var dest3 = import_pino3.default.destination({ dest: getLogFilePath3(currentDate3), sync: false, mkdir: true });
+function checkRotation3() {
+  const today = getTodayDateStr3();
+  if (today !== currentDate3) {
+    currentDate3 = today;
+    dest3.reopen(getLogFilePath3(today));
+    cleanupOldLogs3();
+  }
+}
+function writeSkillUsage(skillName) {
+  checkRotation3();
+  const timestamp = formatTimestampUTC83();
+  dest3.write(`|${timestamp}|${skillName}|
+`);
+}
+function classifySkillMdReadPath(path23) {
+  if (typeof path23 !== "string" || path23.trim().length === 0) return null;
+  const normalized = path23.replace(/\\/g, "/");
+  const skillMd = normalized.match(/(?:core_)?skills\/([^/'"\s;&|]+)\/SKILL\.md(?:$|[\s?'"])/i);
+  if (skillMd) return { kind: "skillMd", skillName: skillMd[1] };
+  const otherMd = normalized.match(
+    /(?:^|[/\s"';&|])(?:core_)?skills\/([^/'"\s;&|]+)\/[^\s"';&|]*?\.md(?:$|[\s"';&|?])/i
+  );
+  if (otherMd) return { kind: "otherSkillMd", skillName: otherMd[1] };
+  return null;
+}
+var PENDING_SKILL_MD_READ_TTL_MS = 10 * 60 * 1e3;
+var pendingSkillMdReads = /* @__PURE__ */ new Map();
+function pendingKey(sessionKey, skillName) {
+  return `${sessionKey}|${skillName.toLowerCase()}`;
+}
+function armFlushTimer(key) {
+  const timer = setTimeout(() => flushPendingEntry(key), PENDING_SKILL_MD_READ_TTL_MS);
+  timer.unref?.();
+  return timer;
+}
+function flushPendingEntry(key) {
+  const entry = pendingSkillMdReads.get(key);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pendingSkillMdReads.delete(key);
+  for (let i2 = 0; i2 < entry.count; i2++) {
+    writeSkillUsage(entry.skillName);
+  }
+}
+function markSkillMdRead(sessionKey, skillName) {
+  const key = pendingKey(sessionKey, skillName);
+  const existing = pendingSkillMdReads.get(key);
+  if (existing) {
+    existing.count += 1;
+    clearTimeout(existing.timer);
+    existing.timer = armFlushTimer(key);
+    return;
+  }
+  pendingSkillMdReads.set(key, { count: 1, skillName, timer: armFlushTimer(key) });
+}
+function suppressPendingSkillMdRead(sessionKey, skillName) {
+  const key = pendingKey(sessionKey, skillName);
+  const entry = pendingSkillMdReads.get(key);
+  if (!entry) return;
+  clearTimeout(entry.timer);
+  pendingSkillMdReads.delete(key);
+}
+function flushPendingSkillMdReads(sessionKey) {
+  for (const key of [...pendingSkillMdReads.keys()]) {
+    if (sessionKey !== void 0 && !key.startsWith(`${sessionKey}|`)) continue;
+    flushPendingEntry(key);
+  }
 }
 
 // index.ts
 init_conversation_manager();
 init_logger();
-function extractSkillNameFromPath(filePath) {
-  if (typeof filePath !== "string" || !filePath) return null;
-  const normalized = filePath.replace(/^~\//, "/home/").replace(/\\/g, "/");
-  const match = normalized.match(/\/(?:core_)?skills\/([^/]+)\/SKILL\.md$/i);
-  return match ? match[1] : null;
+var A2A_OUT_LOG_ENABLED = true;
+setA2AOutLogEnabled(A2A_OUT_LOG_ENABLED);
+function extractSkillNameFromPathText2(text) {
+  const normalized = text.replace(/\\/g, "/");
+  const m2 = normalized.match(/(?:^|[/\s"';&|])(?:core_)?skills\/([^/'"\s;&|]+)/i);
+  return m2 ? m2[1] : null;
 }
 function registerSkillsDiagnosticHook(api) {
   const SKILL_TOOLS = {
@@ -34554,25 +37458,72 @@ function registerSkillsDiagnosticHook(api) {
   const TOOL_SKILL_MAP = Object.fromEntries(
     Object.entries(SKILL_TOOLS).flatMap(([skill, tools]) => tools.map((t2) => [t2, skill]))
   );
-  function resolveActualToolName(event) {
+  function resolveActualToolName2(event) {
     if (event.toolName === "call_device_tool") {
       const inner = event.params?.toolName;
       if (typeof inner === "string" && inner.length > 0) return inner;
     }
     return event.toolName;
   }
-  api.on("before_tool_call", async (event, _ctx) => {
-    const actualToolName = resolveActualToolName(event);
-    const skillName = TOOL_SKILL_MAP[actualToolName];
-    if (skillName) {
-      writeSkillUsage(skillName);
+  api.on("before_tool_call", async (event, ctx) => {
+    const actualToolName = resolveActualToolName2(event);
+    if (actualToolName === "read") {
+      const classified = classifySkillMdReadPath(event.params?.path);
+      if (classified?.kind === "skillMd") {
+        markSkillMdRead(ctx.sessionKey ?? "", classified.skillName);
+      } else if (classified?.kind === "otherSkillMd") {
+        writeSkillUsage(classified.skillName);
+        suppressPendingSkillMdRead(ctx.sessionKey ?? "", classified.skillName);
+      }
+      return;
     }
-  });
-  api.on("after_tool_call", async (event, _ctx) => {
-    if (event.toolName === "read") {
-      const skillName = extractSkillNameFromPath(event.params?.path);
+    const mappedSkill = TOOL_SKILL_MAP[actualToolName];
+    if (mappedSkill) {
+      writeSkillUsage(mappedSkill);
+      return;
+    }
+    if (actualToolName === "exec" || actualToolName === "bash") {
+      const command = event.params?.command;
+      if (typeof command !== "string" || command.length === 0) return;
+      const skillName = extractSkillNameFromPathText2(command);
       if (skillName) {
         writeSkillUsage(skillName);
+        suppressPendingSkillMdRead(ctx.sessionKey ?? "", skillName);
+      }
+    }
+  });
+  api.on("agent_end", async (_event, ctx) => {
+    try {
+      if (ctx.sessionKey) flushPendingSkillMdReads(ctx.sessionKey);
+    } catch (err) {
+      logger.error("[XY-SKILLS-LOG] agent_end flush failed:", err);
+    }
+  });
+  api.on("session_end", async (_event, ctx) => {
+    try {
+      if (ctx.sessionKey) flushPendingSkillMdReads(ctx.sessionKey);
+    } catch (err) {
+      logger.error("[XY-SKILLS-LOG] session_end flush failed:", err);
+    }
+  });
+  api.on("gateway_stop", async () => {
+    try {
+      flushPendingSkillMdReads();
+    } catch (err) {
+      logger.error("[XY-SKILLS-LOG] gateway_stop flush failed:", err);
+    }
+  });
+  api.agent.events.registerAgentEventSubscription({
+    id: "xy-skills-usage-flush",
+    description: "Flush deferred SKILL.md read usage records on run lifecycle end",
+    streams: ["lifecycle"],
+    handle: (event) => {
+      try {
+        if (event.stream !== "lifecycle" || event?.data?.phase !== "end") return;
+        const sessionKey = event?.sessionKey ?? "";
+        if (sessionKey) flushPendingSkillMdReads(sessionKey);
+      } catch (err) {
+        logger.error("[XY-SKILLS-LOG] lifecycle-end flush failed:", err);
       }
     }
   });
@@ -34698,6 +37649,27 @@ function readJobIdFromResult(result) {
   }
   return void 0;
 }
+function registerCronRunLogHook(api) {
+  api.on("cron_changed", async (event) => {
+    try {
+      if (event.action !== "finished") return;
+      writeCronRunLog({
+        jobId: event.jobId,
+        name: event.job?.name ?? null,
+        createdAtMs: event.job?.createdAtMs ?? null,
+        status: event.status ?? null,
+        durationMs: event.durationMs ?? null,
+        runAtMs: event.runAtMs ?? null,
+        nextRunMs: event.nextRunAtMs ?? null,
+        sessionId: event.sessionId ?? null,
+        model: event.model ?? null,
+        error: event.error ?? null
+      });
+    } catch (err) {
+      logger.error(`[XY-CRON-LOG] Error in cron_changed run-log hook:`, err);
+    }
+  });
+}
 function registerCronRecoveryHook(api) {
   api.on("gateway_start", async (_event, _ctx) => {
     const logTag = "[CRON-RECOVERY-HOOK]";
@@ -34758,58 +37730,7 @@ function registerCronRecoveryHook(api) {
   });
 }
 function registerCronChangedHook(api) {
-  api.on("cron_changed", async (event, ctx) => {
-    const logTag = "[XY-CRON-CHANGED]";
-    const safeJson = (value) => {
-      const seen = /* @__PURE__ */ new WeakSet();
-      try {
-        return JSON.stringify(value, (_key, v) => {
-          if (typeof v === "bigint") return `${v}n`;
-          if (typeof v === "object" && v !== null) {
-            if (seen.has(v)) return "[Circular]";
-            seen.add(v);
-          }
-          return v;
-        });
-      } catch (err) {
-        return `[unserializable: ${err instanceof Error ? err.message : String(err)}]`;
-      }
-    };
-    let cronSnapshot = null;
-    const cronService = ctx?.getCron?.();
-    if (cronService) {
-      const methods = Object.keys(cronService);
-      try {
-        const jobs = await cronService.list();
-        cronSnapshot = {
-          methods,
-          jobCount: jobs.length,
-          jobs: jobs.map((job) => ({
-            id: job.id,
-            name: job.name,
-            agentId: job.agentId,
-            enabled: job.enabled,
-            nextRunAtMs: job.state?.nextRunAtMs,
-            lastRunStatus: job.state?.lastRunStatus
-          }))
-        };
-      } catch (err) {
-        cronSnapshot = {
-          methods,
-          listError: err instanceof Error ? err.message : String(err)
-        };
-      }
-    }
-    logger.log(
-      `${logTag} ${safeJson({
-        event,
-        ctx: {
-          ctxKeys: Object.keys(ctx ?? {}),
-          config: ctx?.config,
-          getCron: cronSnapshot
-        }
-      })}`
-    );
+  api.on("cron_changed", async (event, _ctx) => {
     await syncScheduledTaskOnCronChanged(event);
   });
 }
@@ -34962,7 +37883,10 @@ var plugin = definePluginEntry({
       registerCLIHook(api);
       registerCronRecoveryHook(api);
       registerCronChangedHook(api);
+      registerCronRunLogHook(api);
       registerSkillsDiagnosticHook(api);
+      registerToolStatusHook(api);
+      registerStepInfoHook(api);
     }
   }
 });

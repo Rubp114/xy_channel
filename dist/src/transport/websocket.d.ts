@@ -31,6 +31,7 @@ export interface ManagerDiagnostics {
  * Events:
  * - 'message': (message: A2AJsonRpcRequest, sessionId: string) => void
  * - 'data-event': (event: A2ADataEvent) => void
+ * - 'ask-user-response': (event: AskUserResponse) => void
  * - 'gui-agent-response': (event: any) => void
  * - 'trigger-event': (event: any) => void
  * - 'connected': () => void
@@ -102,6 +103,7 @@ export declare class XYWebSocketManager extends EventEmitter {
      * Start heartbeat.
      */
     private startHeartbeat;
+    private toAskUserResponse;
     private toUploadExeDataEvent;
     private toCrossDeviceTaskResultEvent;
     private toRunCrossTaskA2ARequest;

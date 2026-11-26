@@ -1,3 +1,5 @@
+export declare function setA2AOutLogEnabled(v: boolean): void;
+export declare function isA2AOutLogEnabled(): boolean;
 export interface ScopedLogger {
     log(message: string, ...args: any[]): void;
     warn(message: string, ...args: any[]): void;
