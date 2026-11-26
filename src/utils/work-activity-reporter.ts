@@ -1,6 +1,10 @@
 // 端侧工作场景上报（client-work-activity/v1/task/report）。
 // 需求单号：AR10004AGN【会员活动】积分任务运营活动
 //
+// 接口地址与凭证：全部取自 ~/.openclaw/.xiaoyienv（invoke 同款读取方式）——
+//   source-url + 固定路径 /client-work-activity/v1/task/report（端口后部分）；
+//   PERSONAL-UID / PERSONAL-API-KEY 作 x-uid / x-api-key。
+//
 // 触发场景 → taskType：
 //   1. 调用 xiaoyi-ppt 技能                            → work_generate_ppt
 //   2. 调用 xiaoyi-deep-research / xiaoyi-web-search   → work_deep_research
@@ -23,14 +27,51 @@
 //   - [WORK-REPORT][DEBUG] 日志打印完整请求报文与响应/报错全文。
 
 import * as https from "https";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import { randomUUID } from "crypto";
 import { logger } from "./logger.js";
 import type { XYChannelConfig } from "../types.js";
 
-const REPORT_URL =
-  "https://lfhagmirror.hwcloudtest.cn:18449/client-work-activity/v1/task/report";
+/** 环境文件（与 invoke 同一约定）：~/.openclaw/.xiaoyienv，KEY=VALUE 行、# 注释。 */
+const ENV_FILE_PATH = path.join(os.homedir(), ".openclaw", ".xiaoyienv");
+/** 上报接口路径（端口后的固定部分）；完整地址 = 环境变量 source-url + 本路径。 */
+const REPORT_API_PATH = "/client-work-activity/v1/task/report";
 const REQUEST_TIMEOUT_MS = 10_000;
 const REQUEST_FROM = "openclaw";
+
+/**
+ * 从 .xiaoyienv 读上报所需环境配置（invoke 同款解析）：
+ *   source-url        → 接口地址前缀
+ *   PERSONAL-UID      → x-uid
+ *   PERSONAL-API-KEY  → x-api-key
+ * 任一键缺失/读失败返回 null（调用方跳过上报，不抛错）。地址前缀剥离尾部斜杠。
+ */
+function readEnvConfig(): { sourceUrl: string; uid: string; apiKey: string } | null {
+  try {
+    if (!fs.existsSync(ENV_FILE_PATH)) return null;
+    const envData = fs.readFileSync(ENV_FILE_PATH, "utf-8");
+    const env: Record<string, string> = {};
+    for (const line of envData.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx === -1) continue;
+      const key = trimmed.substring(0, eqIdx).trim();
+      if (key === "source-url" || key === "PERSONAL-UID" || key === "PERSONAL-API-KEY") {
+        env[key] = trimmed.substring(eqIdx + 1).trim();
+      }
+    }
+    const sourceUrl = (env["source-url"] ?? "").replace(/\/+$/, "");
+    const uid = env["PERSONAL-UID"] ?? "";
+    const apiKey = env["PERSONAL-API-KEY"] ?? "";
+    if (!sourceUrl || !uid || !apiKey) return null;
+    return { sourceUrl, uid, apiKey };
+  } catch {
+    return null;
+  }
+}
 
 export type WorkActivityTaskType =
   | "work_generate_ppt"
@@ -110,7 +151,8 @@ export interface WorkActivityReportContext {
   sessionId?: string;
   /** 当前活跃会话的 taskId（填 x-hag-trace-id）；缺失降级 sessionId → uuid。 */
   taskId?: string;
-  /** 频道配置（取 uid/apiKey）；缺失或缺字段时跳过上报。 */
+  /** 已废弃：凭证改由 .xiaoyienv（PERSONAL-UID/PERSONAL-API-KEY）读取，
+   *  本字段不再使用，仅为兼容调用方签名保留。 */
   config?: XYChannelConfig | null;
   /** 去重键后缀：cron 场景传 jobId（每次创建各报一次）；不传则同会话同场景只报一次。 */
   dedupKey?: string;
@@ -123,13 +165,17 @@ export function reportWorkActivity(
 ): void {
   const sessionId = ctx.sessionId ?? "";
   try {
-    const config = ctx.config;
-    if (!config?.uid || !config?.apiKey) {
+    // 接口地址与凭证全部取自 .xiaoyienv（invoke 同款读取）：source-url 为
+    // 地址前缀，PERSONAL-UID / PERSONAL-API-KEY 为 x-uid / x-api-key。
+    // 任一键缺失跳过（不记去重表，env 修复后下个触发点可正常上报）
+    const envCfg = readEnvConfig();
+    if (!envCfg) {
       logger.warn(
-        `[WORK-REPORT] skip taskType=${taskType}: missing uid/apiKey in config`,
+        `[WORK-REPORT] skip taskType=${taskType}: source-url/PERSONAL-UID/PERSONAL-API-KEY not fully set in ${ENV_FILE_PATH}`,
       );
       return;
     }
+    const reportUrl = `${envCfg.sourceUrl}${REPORT_API_PATH}`;
     const key = `${sessionId}|${taskType}|${ctx.dedupKey ?? ""}`;
     if (reportedKeys.has(key)) return;
     reportedKeys.add(key);
@@ -140,8 +186,8 @@ export function reportWorkActivity(
     const headers: Record<string, string> = {
       "content-type": "application/json",
       "x-hag-trace-id": traceId,
-      "x-uid": config.uid,
-      "x-api-key": config.apiKey,
+      "x-uid": envCfg.uid,
+      "x-api-key": envCfg.apiKey,
       "x-request-from": REQUEST_FROM,
       "x-skill-id": "",
       "x-session-id": sessionId,
@@ -153,10 +199,10 @@ export function reportWorkActivity(
     // debug：完整请求报文
     try {
       logger.log(
-        `[WORK-REPORT][DEBUG] request url=${REPORT_URL} headers=${JSON.stringify(headers)} body=${body}`,
+        `[WORK-REPORT][DEBUG] request url=${reportUrl} headers=${JSON.stringify(headers)} body=${body}`,
       );
     } catch { /* ignore */ }
-    postJson(REPORT_URL, headers, body)
+    postJson(reportUrl, headers, body)
       .then(({ status, body: respBody }) => {
         logger.log(`[WORK-REPORT] reported taskType=${taskType}, httpStatus=${status}`);
         // debug：完整响应报文
