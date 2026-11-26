@@ -45,9 +45,10 @@ describe("request-scoped image tool visibility", () => {
     },
   );
 
+  // ask_user 当前处于屏蔽状态（ALWAYS_HIDDEN_TOOLS）：任何版本均不可见
   it.each([
     ["11.7.9.330", false], ["11.7.10.0", false], ["11.7.10.211", false],
-    ["11.7.10.212", true], ["11.7.10.213", true],
+    ["11.7.10.212", false], ["11.7.10.213", false],
   ])("preserves upstream version-gated tools for %s independently of image capability", async (appVer, visible) => {
     const names = await runWithSessionContext(context("phone", ["image"], appVer), async () => toolNames());
     expect(names.includes("ask_user")).toBe(visible);

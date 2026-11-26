@@ -7,13 +7,20 @@ import {
 const tools = [{ name: "create_note" }, { name: "ask_user" }];
 
 describe("app-version tool visibility", () => {
+  // 版本门控谓词语义不变：达到阈值即视为支持
   it.each(["11.7.10.212", "11.7.10.213", "11.7.11.0", "12.0.0.0"])(
-    "exposes ask_user at or above the stepinfo threshold: %s",
+    "isToolVisibleForAppVersion still gates ask_user by version: %s",
     (appVer) => {
       expect(isToolVisibleForAppVersion("ask_user", appVer)).toBe(true);
+    },
+  );
+
+  // 但 ask_user 处于屏蔽状态（ALWAYS_HIDDEN_TOOLS）：列表过滤任何版本都不放行
+  it.each(["11.7.10.212", "11.7.10.213", "11.7.11.0", "12.0.0.0"])(
+    "filterToolsByAppVersion hides ask_user at or above the threshold while masked: %s",
+    (appVer) => {
       expect(filterToolsByAppVersion(tools, appVer).map((tool) => tool.name)).toEqual([
         "create_note",
-        "ask_user",
       ]);
     },
   );

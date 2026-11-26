@@ -23,11 +23,12 @@ describe("xyPlugin ask_user registration", () => {
     mocks.getCurrentSessionContext.mockReset();
   });
 
+  // ask_user 当前处于屏蔽状态（ALWAYS_HIDDEN_TOOLS）：所有版本/缺省均不暴露
   it.each([
     ["11.7.9.330", false],
     ["11.7.10.211", false],
-    ["11.7.10.212", true],
-    ["11.7.10.213", true],
+    ["11.7.10.212", false],
+    ["11.7.10.213", false],
     [undefined, false],
   ])("applies appVersion visibility to the model-facing tool list", (appVer, visible) => {
     mocks.getCurrentSessionContext.mockReturnValue({
