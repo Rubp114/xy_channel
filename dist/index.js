@@ -5067,6 +5067,52 @@ var init_body_round_cards = __esm({
   }
 });
 
+// src/utils/steer-suppression.ts
+function noteStreamActivity(sessionId) {
+  streamActiveSessions.add(sessionId);
+}
+function clearStreamActivity(sessionId) {
+  streamActiveSessions.delete(sessionId);
+}
+function hasStreamActivity(sessionId) {
+  return streamActiveSessions.has(sessionId);
+}
+function markSteerSuppression(sessionId) {
+  suppressedSessions.add(sessionId);
+  dropCountsBySession.set(sessionId, { reasoning: 0, text: 0, card: 0 });
+  logger.withContext(sessionId, "").log(`[STEER-SUPPRESS] window armed`);
+}
+function isSteerSuppressed(sessionId) {
+  return suppressedSessions.has(sessionId);
+}
+function noteSteerSuppressedDrop(sessionId, kind) {
+  const counts = dropCountsBySession.get(sessionId);
+  if (counts) counts[kind] += 1;
+}
+function liftSteerSuppression(sessionId) {
+  if (suppressedSessions.delete(sessionId)) {
+    const counts = dropCountsBySession.get(sessionId);
+    dropCountsBySession.delete(sessionId);
+    const dropped = counts ? counts.reasoning + counts.text + counts.card : 0;
+    const summary = dropped > 0 && counts ? ` \u2014 dropped reasoning\xD7${counts.reasoning}, text\xD7${counts.text}, card\xD7${counts.card}` : "";
+    logger.withContext(sessionId, "").log(`[STEER-SUPPRESS] window lifted${summary}`);
+  }
+}
+function releaseSteerSuppression(sessionId) {
+  streamActiveSessions.delete(sessionId);
+  suppressedSessions.delete(sessionId);
+  dropCountsBySession.delete(sessionId);
+}
+var streamActiveSessions, suppressedSessions, dropCountsBySession;
+var init_steer_suppression = __esm({
+  "src/utils/steer-suppression.ts"() {
+    init_logger();
+    streamActiveSessions = /* @__PURE__ */ new Set();
+    suppressedSessions = /* @__PURE__ */ new Set();
+    dropCountsBySession = /* @__PURE__ */ new Map();
+  }
+});
+
 // src/utils/app-version.ts
 function isBelowLegacyAppVersion(appVer) {
   const parts = appVer.split(".").map((s2) => Number.parseInt(s2, 10));
@@ -16499,10 +16545,23 @@ var init_src = __esm({
 
 // src/transport/push.ts
 import { randomUUID } from "crypto";
+function getRateLimitRetryDelayMs(retryAfter) {
+  const value = retryAfter?.trim() ?? "";
+  if (/^\d+$/.test(value)) {
+    return Number(value) * 1e3;
+  }
+  if (/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i.test(value)) {
+    const retryAt = Date.parse(value);
+    if (Number.isFinite(retryAt)) {
+      return Math.max(0, retryAt - Date.now());
+    }
+  }
+  return PUSH_RATE_LIMIT_DELAY_MS + Math.floor(Math.random() * (PUSH_RATE_LIMIT_JITTER_MS + 1));
+}
 function sleep(ms) {
   return new Promise((resolve2) => setTimeout(resolve2, ms));
 }
-var PUSH_RETRY_DELAYS_MS, PUSH_MAX_ATTEMPTS, PUSH_RETRYABLE_STATUSES, XYPushService;
+var PUSH_RETRY_DELAYS_MS, PUSH_MAX_ATTEMPTS, PUSH_RETRYABLE_STATUSES, PUSH_RATE_LIMIT_STATUS, PUSH_MAX_RATE_LIMIT_RETRIES, PUSH_RATE_LIMIT_DELAY_MS, PUSH_RATE_LIMIT_JITTER_MS, MAX_TIMER_DELAY_MS, XYPushService;
 var init_push = __esm({
   "src/transport/push.ts"() {
     init_src();
@@ -16510,6 +16569,11 @@ var init_push = __esm({
     PUSH_RETRY_DELAYS_MS = [2e3, 3e3, 4e3];
     PUSH_MAX_ATTEMPTS = PUSH_RETRY_DELAYS_MS.length + 1;
     PUSH_RETRYABLE_STATUSES = /* @__PURE__ */ new Set([408, 425, 429, 500, 502, 503, 504]);
+    PUSH_RATE_LIMIT_STATUS = 429;
+    PUSH_MAX_RATE_LIMIT_RETRIES = 2;
+    PUSH_RATE_LIMIT_DELAY_MS = 13e3;
+    PUSH_RATE_LIMIT_JITTER_MS = 2e3;
+    MAX_TIMER_DELAY_MS = 2147483647;
     XYPushService = class {
       constructor(config) {
         this.config = config;
@@ -16593,6 +16657,8 @@ var init_push = __esm({
               ]
             }
           };
+          let rateLimitRetries = 0;
+          let transientRetries = 0;
           for (let attempt = 1; attempt <= PUSH_MAX_ATTEMPTS; attempt++) {
             const response = await fetch2(pushUrl, {
               method: "POST",
@@ -16609,12 +16675,21 @@ var init_push = __esm({
             logger.log(`[PUSH] Response received, HTTP Status: ${response.status} ${response.statusText}, attempt ${attempt}/${PUSH_MAX_ATTEMPTS}`);
             if (!response.ok) {
               const errorText = await response.text();
-              const canRetry = PUSH_RETRYABLE_STATUSES.has(response.status) && attempt < PUSH_MAX_ATTEMPTS;
-              if (!canRetry) {
+              const isRateLimited = response.status === PUSH_RATE_LIMIT_STATUS;
+              const canRetry = PUSH_RETRYABLE_STATUSES.has(response.status) && attempt < PUSH_MAX_ATTEMPTS && (!isRateLimited || rateLimitRetries < PUSH_MAX_RATE_LIMIT_RETRIES);
+              const delayMs = canRetry ? isRateLimited ? getRateLimitRetryDelayMs(response.headers.get("retry-after")) : PUSH_RETRY_DELAYS_MS[transientRetries] : void 0;
+              if (delayMs === void 0 || delayMs > MAX_TIMER_DELAY_MS) {
+                if (delayMs !== void 0) {
+                  logger.log(`[PUSH] Retry-After exceeds the supported timer range, Trace ID: ${traceId}`);
+                }
                 logger.error(`[PUSH] Push request failed after ${attempt} attempt(s), HTTP Status: ${response.status}`);
                 throw new Error(`Push failed after ${attempt} attempt(s): HTTP ${response.status} - ${errorText}`);
               }
-              const delayMs = PUSH_RETRY_DELAYS_MS[attempt - 1];
+              if (isRateLimited) {
+                rateLimitRetries++;
+              } else {
+                transientRetries++;
+              }
               logger.log(`[PUSH] HTTP ${response.status} on attempt ${attempt}/${PUSH_MAX_ATTEMPTS}, retrying in ${delayMs}ms, Trace ID: ${traceId}`);
               await sleep(delayMs);
               continue;
@@ -18595,6 +18670,7 @@ function registerTask(sessionId, taskId, messageId) {
 function completeTask(sessionId, expectedTaskId) {
   const session = sessions.get(sessionId);
   if (!session) return;
+  releaseSteerSuppression(sessionId);
   if (!expectedTaskId) {
     logger.log(`[TASK_MANAGER] Removing taskId`);
     for (const entry of session.tasks) {
@@ -18655,7 +18731,7 @@ async function rotateStreamingTextSegment(params) {
     });
     await session.outboundQueue.whenIdle();
   }
-  if (session && isReasoningSegmentOpen(taskId)) {
+  if (session && isReasoningSegmentOpen(taskId) && !isSteerSuppressed(sessionId)) {
     markReasoningBlockClosed(taskId, peekReasoningSegmentSeq(taskId));
     noteReasoningBlockClosedForToolCarry(taskId, peekReasoningSegmentSeq(taskId));
     closeReasoningSegment(taskId);
@@ -18690,6 +18766,8 @@ async function rotateStreamingTextSegment(params) {
       })
     });
     await session.outboundQueue.whenIdle();
+  } else if (session && isReasoningSegmentOpen(taskId)) {
+    closeReasoningSegment(taskId);
   }
   cutReasoningSegment(taskId);
   const newId = rotateStreamingTextId(taskId);
@@ -19175,6 +19253,7 @@ var init_conversation_manager = __esm({
     init_streaming_text_id();
     init_status_card_seq();
     init_body_round_cards();
+    init_steer_suppression();
     init_app_version();
     init_body_text_state();
     init_reasoning_segment();
@@ -19460,6 +19539,33 @@ var init_pushdata_manager = __esm({
     init_async_mutex();
     PUSHDATA_FILE = "/home/sandbox/.openclaw/pushData.json";
     MAX_PUSHDATA_ITEMS = 1e3;
+  }
+});
+
+// src/utils/entitlement-failure.ts
+function trackEntitlementFailure(task) {
+  const outcome = { entitlementFailed: false, replySelected: false };
+  latestModelResults.set(task, outcome);
+  return (result) => {
+    outcome.entitlementFailed = result?.stopReason === "error" && typeof result.errorMessage === "string" && result.errorMessage.trim() === ENTITLEMENT_FAILURE_TEXT;
+  };
+}
+function selectEntitlementFailureReply(text, task) {
+  const outcome = task ? latestModelResults.get(task) : void 0;
+  if (!outcome?.entitlementFailed || !GENERIC_MODEL_FAILURE.test(text.trim())) return;
+  outcome.replySelected = true;
+  return ENTITLEMENT_FAILURE_REPLY;
+}
+function getSelectedEntitlementFailureReply(task) {
+  if (task && latestModelResults.get(task)?.replySelected) return ENTITLEMENT_FAILURE_REPLY;
+}
+var ENTITLEMENT_FAILURE_TEXT, ENTITLEMENT_FAILURE_REPLY, GENERIC_MODEL_FAILURE, latestModelResults;
+var init_entitlement_failure = __esm({
+  "src/utils/entitlement-failure.ts"() {
+    ENTITLEMENT_FAILURE_TEXT = "\u7528\u6237\u6743\u76CA\u6821\u9A8C\u5931\u8D25";
+    ENTITLEMENT_FAILURE_REPLY = "\u672C\u6B21\u4EFB\u52A1\u672A\u80FD\u901A\u8FC7\u6743\u76CA\u6821\u9A8C\u3002\u8BF7\u67E5\u770B\u5C0F\u827A Work \u79EF\u5206\u548C\u4F1A\u5458\u6743\u76CA\u540E\u518D\u8BD5\u3002";
+    GENERIC_MODEL_FAILURE = /^LLM request failed\.?$/i;
+    latestModelResults = /* @__PURE__ */ new WeakMap();
   }
 });
 
@@ -19872,6 +19978,8 @@ function createXYReplyDispatcher(params) {
         scopedLog().log(`[DELIVER SKIP] Canceled/superseded turn`);
         return;
       }
+      clearStreamActivity(sessionId);
+      const steerSuppressed = isSteerSuppressed(sessionId);
       let text = payload.text ?? "";
       if (payload.isCompactionNotice && text) {
         text = text.replace(
@@ -19880,13 +19988,27 @@ function createXYReplyDispatcher(params) {
         ).replace(/^🧹 Compacting context\.\.\.$/, "\u{1F9F9} \u6B63\u5728\u6574\u7406\u4E0A\u4E0B\u6587\u2026").replace(/^🧹 Compaction complete$/, "\u{1F9F9} \u4E0A\u4E0B\u6587\u6574\u7406\u5B8C\u6210").replace(/^🧹 Compaction incomplete$/, "\u{1F9F9} \u4E0A\u4E0B\u6587\u6574\u7406\u672A\u5B8C\u6210").replace(/^🧹 Compaction not needed$/, "\u{1F9F9} \u65E0\u9700\u6574\u7406\u4E0A\u4E0B\u6587").replace(/^✅ Context compacted.*$/, "\u2705 \u4E0A\u4E0B\u6587\u6574\u7406\u5B8C\u6210\uFF0C\u7EE7\u7EED\u4E4B\u524D\u7684\u5DE5\u4F5C\u3002");
       }
       text = rewriteOpenclawFailureText(text);
+      const entitlementReply = info?.kind === "final" && payload.isError ? selectEntitlementFailureReply(text, getCurrentTask(sessionId)) : void 0;
+      text = entitlementReply ?? text;
       scopedLog().log(`[DELIVER] kind=${info?.kind}, text.length=${text.length}`);
       try {
+        if (steerSuppressed) {
+          if (text.trim() && info?.kind === "final" && !payload.isCompactionNotice && !isSystemNoticeText(text)) {
+            assembler.onFinalText(text);
+          }
+          hasSentResponse = true;
+          const activeTaskId = getActiveTaskId();
+          closeReasoningSegment(activeTaskId);
+          cutReasoningSegment(activeTaskId);
+          liftSteerSuppression(sessionId);
+          scopedLog().log(`[STEER-SUPPRESS] window lifted at deliver (no new message after steer)`);
+          return;
+        }
         if (!text.trim()) {
           scopedLog().log(`[DELIVER SKIP] Empty text, skipping`);
           return;
         }
-        if (info?.kind === "final" && !payload.isCompactionNotice && !isSystemNoticeText(text)) {
+        if (info?.kind === "final" && !entitlementReply && !payload.isCompactionNotice && !isSystemNoticeText(text)) {
           assembler.onFinalText(text);
           scopedLog().log(`[DELIVER] Captured final reply text, length=${text.length}`);
         }
@@ -19953,6 +20075,7 @@ function createXYReplyDispatcher(params) {
     onIdle: async () => {
       scopedLog().log(`[ON-IDLE] Reply idle, hasSentResponse=${hasSentResponse}, finalSent=${finalSent}`);
       clearTurnInflight(sessionId, taskId);
+      liftSteerSuppression(sessionId);
       if (isOutputStale()) {
         const superseded = isTurnSuperseded(sessionId, taskId);
         scopedLog().log(`[ON-IDLE] Suppressing terminal output for canceled/superseded turn`);
@@ -19992,6 +20115,8 @@ function createXYReplyDispatcher(params) {
           const terminalTaskId = getActiveTaskId();
           const terminalMessageId = getActiveMessageId();
           setSessionState(sessionId, "completing");
+          const entitlementReply = getSelectedEntitlementFailureReply(getCurrentTask(sessionId));
+          if (entitlementReply) assembler.onFinalText(entitlementReply);
           const { fullText: fullFinalText, resolvedLastText, diagnostic } = assembler.finalize();
           if (diagnostic === "patched-tail") {
             scopedLog().log(`[ON-IDLE] Streamed text missing tail, patched from final payload, canonical.length=${resolvedLastText.length}`);
@@ -20207,8 +20332,18 @@ function createXYReplyDispatcher(params) {
         const text = payload.text ?? "";
         scopedLog().log(`[TOOL-RESULT] Tool result, text.length: ${text.length}`);
       },
+      onAssistantMessageStart: () => {
+        if (!isSteerSuppressed(sessionId)) return;
+        const activeTaskId = getActiveTaskId();
+        closeReasoningSegment(activeTaskId);
+        cutReasoningSegment(activeTaskId);
+        clearStreamActivity(sessionId);
+        liftSteerSuppression(sessionId);
+        scopedLog().log(`[STEER-SUPPRESS] window lifted at assistant message_start`);
+      },
       onReasoningStream: async (payload) => {
         if (isOutputStale()) return;
+        noteStreamActivity(sessionId);
         let text = payload.text ?? "";
         const lines = text.split(/\r?\n/);
         if (lines[0]?.trim() === "Reasoning:") {
@@ -20216,6 +20351,10 @@ function createXYReplyDispatcher(params) {
         }
         try {
           if (text.length > 0) {
+            if (isSteerSuppressed(sessionId)) {
+              noteSteerSuppressedDrop(sessionId, "reasoning");
+              return;
+            }
             const reasoningTaskId = getActiveTaskId();
             const segmentText = noteReasoningSnapshot(reasoningTaskId, text);
             markReasoningStreaming(reasoningTaskId);
@@ -20244,6 +20383,11 @@ function createXYReplyDispatcher(params) {
         const endTaskId = getActiveTaskId();
         markReasoningFinished(endTaskId);
         scopedLog().log(`[REASONING-END] Reasoning finished, taskId=${endTaskId}`);
+        if (isSteerSuppressed(sessionId)) {
+          closeReasoningSegment(endTaskId);
+          noteSteerSuppressedDrop(sessionId, "reasoning");
+          return;
+        }
         try {
           const reasoningStreamingTextId = getOrCreateStreamingTextId(endTaskId);
           if (!isBodyTextSent(endTaskId)) {
@@ -20290,7 +20434,12 @@ function createXYReplyDispatcher(params) {
         if (isOutputStale()) return;
         const text = payload.text ?? "";
         if (text.length === 0) return;
+        noteStreamActivity(sessionId);
         hasSentResponse = true;
+        if (isSteerSuppressed(sessionId)) {
+          noteSteerSuppressedDrop(sessionId, "text");
+          return;
+        }
         const prevChain = streamChain;
         let releaseChain;
         streamChain = new Promise((resolve2) => {
@@ -20349,10 +20498,12 @@ var init_reply_dispatcher = __esm({
     init_config();
     init_session_manager();
     init_logger();
+    init_entitlement_failure();
     init_conversation_manager();
     init_stream_assembler();
     init_reasoning_state();
     init_body_text_state();
+    init_steer_suppression();
     init_reasoning_segment();
     init_streaming_text_id();
     init_pending_references();
@@ -20831,13 +20982,15 @@ function createLegacyReplyDispatcher(params) {
         ).replace(/^🧹 Compacting context\.\.\.$/, "\u{1F9F9} \u6B63\u5728\u6574\u7406\u4E0A\u4E0B\u6587\u2026").replace(/^🧹 Compaction complete$/, "\u{1F9F9} \u4E0A\u4E0B\u6587\u6574\u7406\u5B8C\u6210").replace(/^🧹 Compaction incomplete$/, "\u{1F9F9} \u4E0A\u4E0B\u6587\u6574\u7406\u672A\u5B8C\u6210").replace(/^🧹 Compaction not needed$/, "\u{1F9F9} \u65E0\u9700\u6574\u7406\u4E0A\u4E0B\u6587").replace(/^✅ Context compacted.*$/, "\u2705 \u4E0A\u4E0B\u6587\u6574\u7406\u5B8C\u6210\uFF0C\u7EE7\u7EED\u4E4B\u524D\u7684\u5DE5\u4F5C\u3002");
       }
       text = rewriteOpenclawFailureText2(text);
+      const entitlementReply = info?.kind === "final" && payload.isError ? selectEntitlementFailureReply(text, getCurrentTask(sessionId)) : void 0;
+      text = entitlementReply ?? text;
       scopedLog().log(`[DELIVER] kind=${info?.kind}, text.length=${text.length}`);
       try {
         if (!text.trim()) {
           scopedLog().log(`[DELIVER SKIP] Empty text, skipping`);
           return;
         }
-        if (info?.kind === "final" && !payload.isCompactionNotice && !isSystemNoticeText2(text)) {
+        if (info?.kind === "final" && !entitlementReply && !payload.isCompactionNotice && !isSystemNoticeText2(text)) {
           assembler.onFinalText(text);
           scopedLog().log(`[DELIVER] Captured final reply text, length=${text.length}`);
         }
@@ -20946,6 +21099,8 @@ function createLegacyReplyDispatcher(params) {
           }
           const terminalTaskId = getActiveTaskId();
           const terminalMessageId = getActiveMessageId();
+          const entitlementReply = getSelectedEntitlementFailureReply(getCurrentTask(sessionId));
+          if (entitlementReply) assembler.onFinalText(entitlementReply);
           const { fullText: fullFinalText, resolvedLastText, diagnostic } = assembler.finalize();
           if (diagnostic === "patched-tail") {
             scopedLog().log(`[ON-IDLE] Streamed text missing tail, patched from final payload, canonical.length=${resolvedLastText.length}`);
@@ -21228,6 +21383,7 @@ var init_reply_dispatcher2 = __esm({
     init_config();
     init_session_manager();
     init_logger();
+    init_entitlement_failure();
     init_conversation_manager();
     init_keepalive();
     init_stream_assembler();
@@ -22082,36 +22238,6 @@ async function handleXYMessage(params) {
     const runCrossTaskContext = extractRunCrossTaskContext(parsed.parts);
     const config = resolveXYConfig(cfg);
     cacheXYConfig(config);
-    if (isLegacyAppVersion(parsed.taskId)) {
-      log.log(`[BOT] Sending initial status update (legacy)`);
-      void sendStatusUpdate2({
-        config,
-        sessionId: parsed.sessionId,
-        taskId: parsed.taskId,
-        messageId: parsed.messageId,
-        text: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019~",
-        state: "working"
-      }).catch((err) => {
-        log.error(`Failed to send initial status update (legacy):`, err);
-      });
-    } else {
-      const startSession = getOrCreateSession(parsed.sessionId);
-      const startTaskId = parsed.taskId;
-      const startMessageId = parsed.messageId;
-      startSession.outboundQueue.enqueue({
-        taskId: startTaskId,
-        label: "task-card-start",
-        send: () => sendDisplayTaskCardData({
-          config,
-          sessionId: parsed.sessionId,
-          taskId: startTaskId,
-          messageId: startMessageId,
-          index: 1,
-          stepName: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D",
-          isFinal: false
-        })
-      });
-    }
     let route = core.channel.routing.resolveAgentRoute({
       cfg,
       channel: "xiaoyi-channel",
@@ -22245,6 +22371,36 @@ async function handleXYMessage(params) {
         }
         registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
         log.log(`[BOT-STEER] Direct steer succeeded \u2014 message injected into active run`);
+        if (isLegacyAppVersion(parsed.taskId)) {
+          void sendStatusUpdate2({
+            config,
+            sessionId: parsed.sessionId,
+            taskId: parsed.taskId,
+            messageId: parsed.messageId,
+            text: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019~",
+            state: "working"
+          }).catch((err) => {
+            log.error(`Failed to send steer start status update (legacy):`, err);
+          });
+        } else {
+          getOrCreateSession(parsed.sessionId).outboundQueue.enqueue({
+            taskId: parsed.taskId,
+            label: "task-card-start",
+            send: () => sendDisplayTaskCardData({
+              config,
+              sessionId: parsed.sessionId,
+              taskId: parsed.taskId,
+              messageId: parsed.messageId,
+              index: 1,
+              stepName: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D",
+              isFinal: false
+            })
+          });
+        }
+        if (hasStreamActivity(parsed.sessionId)) {
+          markSteerSuppression(parsed.sessionId);
+          log.log(`[BOT-STEER] Suppression window armed \u2014 in-flight stream output dropped until next assistant message_start`);
+        }
         return;
       }
       steerFailReason = steerResult.reason;
@@ -22342,6 +22498,36 @@ async function handleXYMessage(params) {
       bindSessionKey(route.sessionKey, parsed.sessionId, parsed.taskId, parsed.messageId);
     }
     if (isUpdate && steerFailReason) log.log(`[BOT-STEER] Previous turn settled, re-dispatching as a new turn`);
+    if (isLegacyAppVersion(parsed.taskId)) {
+      log.log(`[BOT] Sending initial status update (legacy)`);
+      void sendStatusUpdate2({
+        config,
+        sessionId: parsed.sessionId,
+        taskId: parsed.taskId,
+        messageId: parsed.messageId,
+        text: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019~",
+        state: "working"
+      }).catch((err) => {
+        log.error(`Failed to send initial status update (legacy):`, err);
+      });
+    } else {
+      const startSession = getOrCreateSession(parsed.sessionId);
+      const startTaskId = parsed.taskId;
+      const startMessageId = parsed.messageId;
+      startSession.outboundQueue.enqueue({
+        taskId: startTaskId,
+        label: "task-card-start",
+        send: () => sendDisplayTaskCardData({
+          config,
+          sessionId: parsed.sessionId,
+          taskId: startTaskId,
+          messageId: startMessageId,
+          index: 1,
+          stepName: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D",
+          isFinal: false
+        })
+      });
+    }
     let dispatchCfg = cfg;
     if (modelCapabilities.supportsNativeImages) {
       dispatchCfg = {
@@ -22617,6 +22803,7 @@ var init_bot = __esm({
     init_runtime_manager();
     init_tool_call_nudge_manager();
     init_steer_service();
+    init_steer_suppression();
     init_app_version();
     init_status_card_seq();
     init_conversation_manager();
@@ -24896,6 +25083,8 @@ function gateCronSendText(swallowedText, announceLike, config) {
 }
 
 // src/provider.ts
+init_conversation_manager();
+init_entitlement_failure();
 init_self_evolution_manager();
 
 // src/compaction-provider.ts
@@ -25243,10 +25432,14 @@ function sleep3(ms) {
 }
 function createRetryingStream(createStream, options) {
   const { cronJob, retryOnAnyError = false, fallbackCreateStream, onFallback, onFallbackDone, onFirstContent } = options;
-  let resultResolve;
+  let resolveResult;
   const resultPromise = new Promise((resolve2) => {
-    resultResolve = resolve2;
+    resolveResult = resolve2;
   });
+  const resultResolve = (result) => {
+    options.onResult?.(result);
+    resolveResult(result);
+  };
   const CONTENT_EVENT_TYPES = /* @__PURE__ */ new Set([
     "text_start",
     "text_delta",
@@ -25576,7 +25769,7 @@ var GUI_AGENT_SAFETY_RULES = `
 3. \u4E0D\u5F97\u57FA\u4E8E\u6A21\u578B\u63A8\u65AD\u3001\u4E0A\u4E0B\u6587\u731C\u6D4B\u3001\u9ED8\u8BA4\u610F\u56FE\u6216\u5386\u53F2\u4FE1\u606F\u76F4\u63A5\u6267\u884C\u4EFB\u4F55\u654F\u611F\u64CD\u4F5C\u3002
 4. \u5982\u64CD\u4F5C\u5BF9\u8C61\u3001\u8303\u56F4\u3001\u53C2\u6570\u3001\u6267\u884C\u65B9\u5F0F\u6216\u9884\u671F\u7ED3\u679C\u5B58\u5728\u4EFB\u4F55\u4E0D\u786E\u5B9A\u6027\uFF0C\u5FC5\u987B\u5148\u5411\u7528\u6237\u786E\u8BA4\uFF0C\u4E0D\u5F97\u81EA\u884C\u8865\u5168\u3001\u4FEE\u6539\u6216\u5047\u8BBE\u3002
 5. \u5728\u7528\u6237\u5B8C\u6210\u4E8C\u6B21\u660E\u786E\u786E\u8BA4\u4E4B\u524D\uFF0C\u7981\u6B62\u8C03\u7528 \`xiaoyi_gui_agent\` \u53D1\u8D77\u4EFB\u4F55\u5B9E\u9645\u64CD\u4F5C\u3002
-6. \u5982\u679C\u7528\u6237\u4E8C\u6B21\u786E\u8BA4\u7684\u4FE1\u606F\u4E0D\u5305\u542B\u660E\u786E\u6307\u4EE4\uFF0C\u4E5F\u662F\u6A21\u7CCA\u4E0D\u786E\u5B9A\u7684\uFF08\u4F8B\u5982\uFF1A\u4F60\u770B\u7740\u529E\uFF0C\u4F60\u6765\u51B3\u5B9A\u5427\uFF0C\u4F60\u5E2E\u6211\u51B3\u5B9A\u5427\uFF0C\u4F60\u968F\u4FBF\u9009\u5427\uFF09\uFF0C\u4E5F\u8981\u4E25\u7981\u76F4\u63A5\u6267\u884C\uFF0C\u5FC5\u987B\u83B7\u53D6\u7528\u6237\u660E\u786E\u7684\u6307\u4EE4
+6. \u5982\u679C\u7528\u6237\u4E8C\u6B21\u786E\u8BA4\u7684\u4FE1\u606F\u4E0D\u5305\u542B\u660E\u786E\u6307\u4EE4\uFF0C\u4E5F\u662F\u6A21\u7CCA\u4E0D\u786E\u5B9A\u7684\uFF08\u4F8B\u5982\uFF1A\u4F60\u770B\u7740\u529E\uFF0C\u4F60\u6765\u51B3\u5B9A\u5427\uFF0C\u4F60\u5E2E\u6211\u51B3\u5B9A\u5427\uFF0C\u4F60\u968F\u4FBF\u9009\u5427\uFF0C\u4F60\u5E2E\u6211\u64CD\u4F5C,\u4F60\u76F4\u63A5\u5E2E\u6211\u64CD\u4F5C\uFF0C\u4F60\u5E2E\u6211\u6267\u884C\uFF09\uFF0C\u4E5F\u8981\u4E25\u7981\u76F4\u63A5\u6267\u884C\uFF0C\u5FC5\u987B\u83B7\u53D6\u7528\u6237\u660E\u786E\u786E\u8BA4\u6216\u8005\u62D2\u7EDD\u7684\u6307\u4EE4\uFF0C\u660E\u786E\u7684\u6307\u4EE4\u5FC5\u987B\u5305\u542B\u201C\u786E\u8BA4\u201D\uFF0C\u201C\u540C\u610F\u201D\u8FD9\u7C7B\u786E\u5B9A\u6027\u7684\u8BCD\u8BED
 7. \u5982\u679C\u7528\u6237\u8BE2\u95EE\u8BBE\u5907\u5E94\u7528\u5B89\u88C5\u5217\u8868\uFF0C\u4E25\u7981\u901A\u8FC7xiaoyi_gui_agent\u5DE5\u5177\u8FDB\u884C\u67E5\u8BE2
 8. \u5982\u679C\u6700\u7EC8\u786E\u8BA4\u8981\u8C03\u7528xiaoyi_gui_agent\uFF0C\u5DE5\u5177\u5165\u53C2\u53EA\u9700\u8981\u628A\u7528\u6237\u7684\u8BC9\u6C42\u5B8C\u6574\u8F6C\u8FF0\u5373\u53EF\uFF0C\u4E25\u7981\u81EA\u884C\u5C06\u7528\u6237\u8BC9\u6C42\u7684\u64CD\u4F5C\u6B65\u9AA4\u81EA\u884C\u8BE6\u7EC6\u5C55\u5F00\u540E\u4F5C\u4E3Axiaoyi_gui_agent\u7684\u5DE5\u5177\u5165\u53C2
 
@@ -25951,8 +26144,11 @@ var xiaoyiProvider = {
         );
       }
       const restoreNoticeSessionId = isKimiK3 && sessionCtx?.sessionId && isKimiK3RestorePending(sessionCtx.sessionId) ? sessionCtx.sessionId : void 0;
+      const activeTask = sessionCtx && !cronJob ? getCurrentTask(sessionCtx.sessionId) : null;
+      const requestTaskId = extractedTaskId ?? sessionCtx?.taskId;
       return createRetryingStream(makeStream, {
         cronJob,
+        onResult: activeTask && activeTask.taskId === requestTaskId ? trackEntitlementFailure(activeTask) : void 0,
         retryOnAnyError: isKimiK3,
         fallbackCreateStream: canUseKimiFallback ? () => underlying({
           ...model,
@@ -36308,6 +36504,7 @@ init_conversation_manager();
 init_session_manager();
 init_logger();
 init_app_version();
+init_steer_suppression();
 var LOG_TAG = "[STEP-INFO]";
 var DISPLAY_BY_TOOL = {
   // Web
@@ -36495,9 +36692,12 @@ function registerStepInfoHook(api) {
       if (!sendCtx) return;
       if (isLegacyAppVersion(sendCtx.taskId)) return;
       const bodyTextSent = isBodyTextProduced(sendCtx.sessionId, sendCtx.taskId);
+      const steerSuppressed = isSteerSuppressed(sendCtx.sessionId);
       const skillAction = detectSkillAction(event);
       if (skillAction) {
-        if (bodyTextSent) {
+        if (steerSuppressed) {
+          noteSteerSuppressedDrop(sendCtx.sessionId, "card");
+        } else if (bodyTextSent) {
           logger.log(
             `${LOG_TAG} body text already sent in current segment, suppressing skill card action=${skillAction.action} skill=${skillAction.skillName}`
           );
@@ -36524,13 +36724,17 @@ function registerStepInfoHook(api) {
       }
       if (TASK_CARD_TOOLS.has(event.toolName)) {
         if (event.toolName === "update_plan" && !bodyTextSent) {
-          const planSteps = extractInProgressPlanSteps(event.params);
-          for (const stepText of planSteps) {
-            await sendExecuteStatusCard({
-              ...sendCtx,
-              toolCallId: event.toolCallId,
-              text: stepText
-            });
+          if (steerSuppressed) {
+            noteSteerSuppressedDrop(sendCtx.sessionId, "card");
+          } else {
+            const planSteps = extractInProgressPlanSteps(event.params);
+            for (const stepText of planSteps) {
+              await sendExecuteStatusCard({
+                ...sendCtx,
+                toolCallId: event.toolCallId,
+                text: stepText
+              });
+            }
           }
         }
         return;
@@ -36573,6 +36777,7 @@ function registerStepInfoHook(api) {
 
 // src/tool-status-hook.ts
 init_app_version();
+init_steer_suppression();
 init_conversation_manager();
 init_config();
 init_conversation_manager();
@@ -36618,6 +36823,10 @@ function registerToolStatusHook(api) {
       if (!meta) return;
       if (isBodyTextProduced(binding.sessionId, taskId)) {
         logger.log(`[TOOL-STATUS] Body text already produced in current segment, suppressing status card for ${toolName}`);
+        return;
+      }
+      if (isSteerSuppressed(binding.sessionId)) {
+        noteSteerSuppressedDrop(binding.sessionId, "card");
         return;
       }
       await sendExecuteStatusCard({

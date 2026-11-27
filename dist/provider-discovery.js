@@ -16081,6 +16081,24 @@ import { randomUUID } from "crypto";
 var PUSH_RETRY_DELAYS_MS = [2e3, 3e3, 4e3];
 var PUSH_MAX_ATTEMPTS = PUSH_RETRY_DELAYS_MS.length + 1;
 var PUSH_RETRYABLE_STATUSES = /* @__PURE__ */ new Set([408, 425, 429, 500, 502, 503, 504]);
+var PUSH_RATE_LIMIT_STATUS = 429;
+var PUSH_MAX_RATE_LIMIT_RETRIES = 2;
+var PUSH_RATE_LIMIT_DELAY_MS = 13e3;
+var PUSH_RATE_LIMIT_JITTER_MS = 2e3;
+var MAX_TIMER_DELAY_MS = 2147483647;
+function getRateLimitRetryDelayMs(retryAfter) {
+  const value = retryAfter?.trim() ?? "";
+  if (/^\d+$/.test(value)) {
+    return Number(value) * 1e3;
+  }
+  if (/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)/i.test(value)) {
+    const retryAt = Date.parse(value);
+    if (Number.isFinite(retryAt)) {
+      return Math.max(0, retryAt - Date.now());
+    }
+  }
+  return PUSH_RATE_LIMIT_DELAY_MS + Math.floor(Math.random() * (PUSH_RATE_LIMIT_JITTER_MS + 1));
+}
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -16167,6 +16185,8 @@ var XYPushService = class {
           ]
         }
       };
+      let rateLimitRetries = 0;
+      let transientRetries = 0;
       for (let attempt = 1; attempt <= PUSH_MAX_ATTEMPTS; attempt++) {
         const response = await fetch2(pushUrl, {
           method: "POST",
@@ -16183,12 +16203,21 @@ var XYPushService = class {
         logger.log(`[PUSH] Response received, HTTP Status: ${response.status} ${response.statusText}, attempt ${attempt}/${PUSH_MAX_ATTEMPTS}`);
         if (!response.ok) {
           const errorText = await response.text();
-          const canRetry = PUSH_RETRYABLE_STATUSES.has(response.status) && attempt < PUSH_MAX_ATTEMPTS;
-          if (!canRetry) {
+          const isRateLimited = response.status === PUSH_RATE_LIMIT_STATUS;
+          const canRetry = PUSH_RETRYABLE_STATUSES.has(response.status) && attempt < PUSH_MAX_ATTEMPTS && (!isRateLimited || rateLimitRetries < PUSH_MAX_RATE_LIMIT_RETRIES);
+          const delayMs = canRetry ? isRateLimited ? getRateLimitRetryDelayMs(response.headers.get("retry-after")) : PUSH_RETRY_DELAYS_MS[transientRetries] : void 0;
+          if (delayMs === void 0 || delayMs > MAX_TIMER_DELAY_MS) {
+            if (delayMs !== void 0) {
+              logger.log(`[PUSH] Retry-After exceeds the supported timer range, Trace ID: ${traceId}`);
+            }
             logger.error(`[PUSH] Push request failed after ${attempt} attempt(s), HTTP Status: ${response.status}`);
             throw new Error(`Push failed after ${attempt} attempt(s): HTTP ${response.status} - ${errorText}`);
           }
-          const delayMs = PUSH_RETRY_DELAYS_MS[attempt - 1];
+          if (isRateLimited) {
+            rateLimitRetries++;
+          } else {
+            transientRetries++;
+          }
           logger.log(`[PUSH] HTTP ${response.status} on attempt ${attempt}/${PUSH_MAX_ATTEMPTS}, retrying in ${delayMs}ms, Trace ID: ${traceId}`);
           await sleep(delayMs);
           continue;
@@ -17503,6 +17532,17 @@ function armSafetyTimer(key) {
   return timer;
 }
 
+// src/utils/entitlement-failure.ts
+var ENTITLEMENT_FAILURE_TEXT = "\u7528\u6237\u6743\u76CA\u6821\u9A8C\u5931\u8D25";
+var latestModelResults = /* @__PURE__ */ new WeakMap();
+function trackEntitlementFailure(task) {
+  const outcome = { entitlementFailed: false, replySelected: false };
+  latestModelResults.set(task, outcome);
+  return (result) => {
+    outcome.entitlementFailed = result?.stopReason === "error" && typeof result.errorMessage === "string" && result.errorMessage.trim() === ENTITLEMENT_FAILURE_TEXT;
+  };
+}
+
 // src/utils/self-evolution-manager.ts
 import fs6 from "node:fs";
 import fsp from "node:fs/promises";
@@ -17688,10 +17728,14 @@ function sleep2(ms) {
 }
 function createRetryingStream(createStream, options) {
   const { cronJob, retryOnAnyError = false, fallbackCreateStream, onFallback, onFallbackDone, onFirstContent } = options;
-  let resultResolve;
+  let resolveResult;
   const resultPromise = new Promise((resolve) => {
-    resultResolve = resolve;
+    resolveResult = resolve;
   });
+  const resultResolve = (result) => {
+    options.onResult?.(result);
+    resolveResult(result);
+  };
   const CONTENT_EVENT_TYPES = /* @__PURE__ */ new Set([
     "text_start",
     "text_delta",
@@ -18021,7 +18065,7 @@ var GUI_AGENT_SAFETY_RULES = `
 3. \u4E0D\u5F97\u57FA\u4E8E\u6A21\u578B\u63A8\u65AD\u3001\u4E0A\u4E0B\u6587\u731C\u6D4B\u3001\u9ED8\u8BA4\u610F\u56FE\u6216\u5386\u53F2\u4FE1\u606F\u76F4\u63A5\u6267\u884C\u4EFB\u4F55\u654F\u611F\u64CD\u4F5C\u3002
 4. \u5982\u64CD\u4F5C\u5BF9\u8C61\u3001\u8303\u56F4\u3001\u53C2\u6570\u3001\u6267\u884C\u65B9\u5F0F\u6216\u9884\u671F\u7ED3\u679C\u5B58\u5728\u4EFB\u4F55\u4E0D\u786E\u5B9A\u6027\uFF0C\u5FC5\u987B\u5148\u5411\u7528\u6237\u786E\u8BA4\uFF0C\u4E0D\u5F97\u81EA\u884C\u8865\u5168\u3001\u4FEE\u6539\u6216\u5047\u8BBE\u3002
 5. \u5728\u7528\u6237\u5B8C\u6210\u4E8C\u6B21\u660E\u786E\u786E\u8BA4\u4E4B\u524D\uFF0C\u7981\u6B62\u8C03\u7528 \`xiaoyi_gui_agent\` \u53D1\u8D77\u4EFB\u4F55\u5B9E\u9645\u64CD\u4F5C\u3002
-6. \u5982\u679C\u7528\u6237\u4E8C\u6B21\u786E\u8BA4\u7684\u4FE1\u606F\u4E0D\u5305\u542B\u660E\u786E\u6307\u4EE4\uFF0C\u4E5F\u662F\u6A21\u7CCA\u4E0D\u786E\u5B9A\u7684\uFF08\u4F8B\u5982\uFF1A\u4F60\u770B\u7740\u529E\uFF0C\u4F60\u6765\u51B3\u5B9A\u5427\uFF0C\u4F60\u5E2E\u6211\u51B3\u5B9A\u5427\uFF0C\u4F60\u968F\u4FBF\u9009\u5427\uFF09\uFF0C\u4E5F\u8981\u4E25\u7981\u76F4\u63A5\u6267\u884C\uFF0C\u5FC5\u987B\u83B7\u53D6\u7528\u6237\u660E\u786E\u7684\u6307\u4EE4
+6. \u5982\u679C\u7528\u6237\u4E8C\u6B21\u786E\u8BA4\u7684\u4FE1\u606F\u4E0D\u5305\u542B\u660E\u786E\u6307\u4EE4\uFF0C\u4E5F\u662F\u6A21\u7CCA\u4E0D\u786E\u5B9A\u7684\uFF08\u4F8B\u5982\uFF1A\u4F60\u770B\u7740\u529E\uFF0C\u4F60\u6765\u51B3\u5B9A\u5427\uFF0C\u4F60\u5E2E\u6211\u51B3\u5B9A\u5427\uFF0C\u4F60\u968F\u4FBF\u9009\u5427\uFF0C\u4F60\u5E2E\u6211\u64CD\u4F5C,\u4F60\u76F4\u63A5\u5E2E\u6211\u64CD\u4F5C\uFF0C\u4F60\u5E2E\u6211\u6267\u884C\uFF09\uFF0C\u4E5F\u8981\u4E25\u7981\u76F4\u63A5\u6267\u884C\uFF0C\u5FC5\u987B\u83B7\u53D6\u7528\u6237\u660E\u786E\u786E\u8BA4\u6216\u8005\u62D2\u7EDD\u7684\u6307\u4EE4\uFF0C\u660E\u786E\u7684\u6307\u4EE4\u5FC5\u987B\u5305\u542B\u201C\u786E\u8BA4\u201D\uFF0C\u201C\u540C\u610F\u201D\u8FD9\u7C7B\u786E\u5B9A\u6027\u7684\u8BCD\u8BED
 7. \u5982\u679C\u7528\u6237\u8BE2\u95EE\u8BBE\u5907\u5E94\u7528\u5B89\u88C5\u5217\u8868\uFF0C\u4E25\u7981\u901A\u8FC7xiaoyi_gui_agent\u5DE5\u5177\u8FDB\u884C\u67E5\u8BE2
 8. \u5982\u679C\u6700\u7EC8\u786E\u8BA4\u8981\u8C03\u7528xiaoyi_gui_agent\uFF0C\u5DE5\u5177\u5165\u53C2\u53EA\u9700\u8981\u628A\u7528\u6237\u7684\u8BC9\u6C42\u5B8C\u6574\u8F6C\u8FF0\u5373\u53EF\uFF0C\u4E25\u7981\u81EA\u884C\u5C06\u7528\u6237\u8BC9\u6C42\u7684\u64CD\u4F5C\u6B65\u9AA4\u81EA\u884C\u8BE6\u7EC6\u5C55\u5F00\u540E\u4F5C\u4E3Axiaoyi_gui_agent\u7684\u5DE5\u5177\u5165\u53C2
 
@@ -18396,8 +18440,11 @@ var xiaoyiProvider = {
         );
       }
       const restoreNoticeSessionId = isKimiK3 && sessionCtx?.sessionId && isKimiK3RestorePending(sessionCtx.sessionId) ? sessionCtx.sessionId : void 0;
+      const activeTask = sessionCtx && !cronJob ? getCurrentTask(sessionCtx.sessionId) : null;
+      const requestTaskId = extractedTaskId ?? sessionCtx?.taskId;
       return createRetryingStream(makeStream, {
         cronJob,
+        onResult: activeTask && activeTask.taskId === requestTaskId ? trackEntitlementFailure(activeTask) : void 0,
         retryOnAnyError: isKimiK3,
         fallbackCreateStream: canUseKimiFallback ? () => underlying({
           ...model,
