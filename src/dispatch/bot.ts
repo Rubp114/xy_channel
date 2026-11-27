@@ -6,7 +6,7 @@ import { callGatewayTool, resolveActiveEmbeddedRunSessionId } from "openclaw/plu
 import { getXYRuntime } from "../runtime.js";
 import { createXYReplyDispatcher } from "./reply-dispatcher.js";
 import { createLegacyReplyDispatcher } from "../legacy/reply-dispatcher.js";
-import { sendStatusUpdate as legacySendStatusUpdate } from "../legacy/formatter.js";
+import { sendStatusUpdate as legacySendStatusUpdate, sendA2AResponse as legacySendA2AResponse } from "../legacy/formatter.js";
 import { parseA2AMessage, extractTextFromParts, extractFileParts, extractPushId, extractDeviceType, extractAppVer, extractSdkApiVersion, extractModelName, extractModelInput, extractTriggerData, extractRunCrossTaskContext, isClearContextMessage, isTasksCancelMessage } from "../parser.js";
 import { downloadFilesFromParts } from "../file-download.js";
 import { isImageAttachment } from "../model-input.js";
@@ -135,15 +135,27 @@ async function sendAdmissionFailure(
   text: string,
 ): Promise<void> {
   const queue = getOrCreateSession(identity.sessionId).outboundQueue;
+  const legacy = isLegacyAppVersion(identity.taskId);
   queue.enqueue({
     taskId: identity.taskId,
     label: "admission-failure-status",
-    send: () => sendStatusUpdate({ ...identity, text, state: "failed" }),
+    send: () => (legacy ? legacySendStatusUpdate : sendStatusUpdate)({ ...identity, text, state: "failed" }),
   });
+  // 高版本补发 final 起始卡（index=1，isFinal=true）关闭卡片展示，
+  // 避免端侧停留在"任务正在处理中"（对齐 0730 failBeforeDispatch）。
+  if (!legacy) {
+    queue.enqueue({
+      taskId: identity.taskId,
+      label: "admission-failure-card",
+      send: () => sendDisplayTaskCardData({
+        ...identity, index: 1, stepName: text, isFinal: true,
+      }),
+    });
+  }
   queue.enqueue({
     taskId: identity.taskId,
     label: "admission-failure-final",
-    send: () => sendA2AResponse({
+    send: () => (legacy ? legacySendA2AResponse : sendA2AResponse)({
       ...identity, text, append: false, final: true, errorCode: 99921111, errorMessage: text,
     }),
   });
@@ -360,18 +372,9 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     const hasNativeImages = modelCapabilities.supportsNativeImages && imageParts.length > 0;
     const requiresNewTurn = Boolean(params.forceNewTurn || hasNativeImages);
     const identity = { config, sessionId: parsed.sessionId, taskId: parsed.taskId, messageId: parsed.messageId };
-    const sendWorkingStatus = () => sendStatusUpdate({
-      ...identity,
-      text: "任务正在处理中，请稍候~",
-      state: "working",
-    });
-    if (requiresNewTurn) {
-      getOrCreateSession(identity.sessionId).outboundQueue.enqueue({
-        taskId: identity.taskId, label: "admission-working-status", send: sendWorkingStatus,
-      });
-    } else {
-      void sendWorkingStatus().catch((err) => log.error("Failed to send initial status update:", err));
-    }
+    // 0730 对齐：入站不再单独下发 working 的 status-update —— 初始/working 帧
+    // 统一由准入后版本分流的起始卡块承担（低版本 status-update / 高版本
+    // DisplayTaskCardData），避免出现 status-update 与起始卡双发。
 
     // Extract text and files from parts
     const text = extractTextFromParts(parsed.parts);
