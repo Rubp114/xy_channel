@@ -22103,15 +22103,28 @@ async function waitForFullTurnAdmission(sessionId, sessionKey, waitForPreviousTu
 }
 async function sendAdmissionFailure(identity, text) {
   const queue = getOrCreateSession(identity.sessionId).outboundQueue;
+  const legacy = isLegacyAppVersion(identity.taskId);
   queue.enqueue({
     taskId: identity.taskId,
     label: "admission-failure-status",
-    send: () => sendStatusUpdate({ ...identity, text, state: "failed" })
+    send: () => (legacy ? sendStatusUpdate2 : sendStatusUpdate)({ ...identity, text, state: "failed" })
   });
+  if (!legacy) {
+    queue.enqueue({
+      taskId: identity.taskId,
+      label: "admission-failure-card",
+      send: () => sendDisplayTaskCardData({
+        ...identity,
+        index: 1,
+        stepName: text,
+        isFinal: true
+      })
+    });
+  }
   queue.enqueue({
     taskId: identity.taskId,
     label: "admission-failure-final",
-    send: () => sendA2AResponse({
+    send: () => (legacy ? sendA2AResponse2 : sendA2AResponse)({
       ...identity,
       text,
       append: false,
@@ -22267,20 +22280,6 @@ async function handleXYMessage(params) {
     const hasNativeImages = modelCapabilities.supportsNativeImages && imageParts.length > 0;
     const requiresNewTurn = Boolean(params.forceNewTurn || hasNativeImages);
     const identity = { config, sessionId: parsed.sessionId, taskId: parsed.taskId, messageId: parsed.messageId };
-    const sendWorkingStatus = () => sendStatusUpdate({
-      ...identity,
-      text: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019~",
-      state: "working"
-    });
-    if (requiresNewTurn) {
-      getOrCreateSession(identity.sessionId).outboundQueue.enqueue({
-        taskId: identity.taskId,
-        label: "admission-working-status",
-        send: sendWorkingStatus
-      });
-    } else {
-      void sendWorkingStatus().catch((err) => log.error("Failed to send initial status update:", err));
-    }
     const text = extractTextFromParts(parsed.parts);
     let textForAgent = text || "";
     if (route.sessionKey && textForAgent) {
