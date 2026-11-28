@@ -1,6 +1,5 @@
 import type { OpenClawPluginApi } from 'openclaw/plugin-sdk';
 import { ApiResponse } from './constants.js';
-export declare function buildTraceId(sessionId: string): string;
 export interface CallApiPayload {
     sceneID: string;
     [key: string]: unknown;

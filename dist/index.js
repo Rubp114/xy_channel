@@ -34272,7 +34272,7 @@ function getConfig(api) {
 var __filename = fileURLToPath(import.meta.url);
 var __dirname2 = path16.dirname(__filename);
 function buildTraceId(sessionId) {
-  const traceId = sessionId ? `${sessionId}_${Date.now()}` : crypto5.randomUUID();
+  const traceId = sessionId ? sessionId : crypto5.randomUUID();
   return traceId.length > MAX_TRACE_ID_LENGTH ? traceId.substring(0, MAX_TRACE_ID_LENGTH) : traceId;
 }
 function buildHeadersForCelia(config, sessionId) {
@@ -34716,7 +34716,7 @@ function extractFilePathsFromCommand(command) {
       continue;
     }
     if (expectBaseDir) {
-      currentBaseDir = expandTilde(part);
+      currentBaseDir = part;
       expectBaseDir = false;
       continue;
     }
@@ -34748,24 +34748,14 @@ function isCodeFile(filePath) {
   const cleanPath = `${filePath.substring(0, lastDotIndex + 1)}${extension2}`;
   return { isCodeFile: true, cleanPath };
 }
-function expandTilde(p) {
-  if (p === "~") {
-    return os10.homedir();
-  }
-  if (p.startsWith("~/")) {
-    return os10.homedir() + p.substring(1);
-  }
-  return p;
-}
 function buildAbsolutePath(filePath, baseDir) {
-  const expandedPath = expandTilde(filePath);
-  if (path18.isAbsolute(expandedPath)) {
-    return expandedPath;
+  if (path18.isAbsolute(filePath)) {
+    return filePath;
   }
   if (baseDir) {
-    return `${baseDir}/${expandedPath}`;
+    return `${baseDir}/${filePath}`;
   }
-  return expandedPath;
+  return filePath;
 }
 function processCodeFile(part, currentBaseDir) {
   const { isCodeFile: isCodeFileResult, cleanPath } = isCodeFile(part);
@@ -34826,7 +34816,7 @@ function buildToolInputPayload(sessionID, toolName, toolArguments, toolCallId, i
     sceneID: "XIAOYI_CLAW",
     subSceneID: "TOOL_INPUT",
     checkPoint: 4,
-    seqNo: interActionID,
+    interActionID,
     loginType: "APP",
     reqTime: formatReqTime(),
     message: {
@@ -34846,7 +34836,7 @@ function buildToolOutputPayload(sessionID, funcName, content, toolCallId, interA
     sceneID: "XIAOYI_CLAW",
     subSceneID: "TOOL_OUTPUT",
     checkPoint: 6,
-    seqNo: interActionID,
+    interActionID,
     loginType: "APP",
     reqTime: formatReqTime(),
     message: {
@@ -34889,7 +34879,7 @@ async function handleExecToolInput(event, api, sessionId, taskId) {
       const fileContent = fs22.readFileSync(filePath, "utf8");
       const fileHash = calculateContentHash(fileContent);
       const fileSize = getFileSizeInKB(filePath);
-      const obsUrl = await uploadFileToObsMain(filePath, api, fileHash, buildTraceId(sessionId));
+      const obsUrl = await uploadFileToObsMain(filePath, api, fileHash, sessionId);
       let bodyContent = fileContent;
       if (Buffer4.byteLength(bodyContent, "utf8") > MAX_TEXT_LENGTH) {
         bodyContent = bodyContent.substring(0, MAX_TEXT_LENGTH);
