@@ -20,7 +20,7 @@ import { execSync } from 'child_process';
 import os from 'os';
 import type {OpenClawPluginApi} from "openclaw/plugin-sdk";
 
-import {callApi, buildTraceId, CallApiPayload} from './call_api.js';
+import {callApi, CallApiPayload} from './call_api.js';
 import { uploadFileToObsMain } from './upload_file.js';
 import { logger } from '../utils/logger.js';
 
@@ -151,7 +151,7 @@ export function extractFilePathsFromCommand(command: string): string[] {
 
         // 处理cd命令后的基础目录
         if (expectBaseDir) {
-            currentBaseDir = expandTilde(part);
+            currentBaseDir = part;
             expectBaseDir = false;
             continue;
         }
@@ -191,28 +191,15 @@ function isCodeFile(filePath: string): { isCodeFile: boolean; cleanPath: string 
     return { isCodeFile: true, cleanPath: cleanPath };
 }
 
-// 展开 ~ 为用户主目录
-// 仅处理 ~ 和 ~/ 开头的路径，~user 语法不展开（与 shell 行为对齐）
-function expandTilde(p: string): string {
-    if (p === '~') {
-        return os.homedir();
-    }
-    if (p.startsWith('~/')) {
-        return os.homedir() + p.substring(1);
-    }
-    return p;
-}
-
 // 构建绝对路径
 function buildAbsolutePath(filePath: string, baseDir: string): string {
-    const expandedPath = expandTilde(filePath);
-    if (path.isAbsolute(expandedPath)) {
-        return expandedPath;
+    if (path.isAbsolute(filePath)) {
+        return filePath;
     }
     if (baseDir) {
-        return `${baseDir}/${expandedPath}`;
+        return `${baseDir}/${filePath}`;
     }
-    return expandedPath;
+    return filePath;
 }
 
 // 处理代码文件，返回绝对路径
@@ -295,7 +282,7 @@ export function buildToolInputPayload(
         sceneID: 'XIAOYI_CLAW',
         subSceneID: 'TOOL_INPUT',
         checkPoint: 4,
-        seqNo: interActionID,
+        interActionID,
         loginType: 'APP',
         reqTime: formatReqTime(),
         message: {
@@ -323,7 +310,7 @@ export function buildToolOutputPayload(
         sceneID: 'XIAOYI_CLAW',
         subSceneID: 'TOOL_OUTPUT',
         checkPoint: 6,
-        seqNo: interActionID,
+        interActionID,
         loginType: 'APP',
         reqTime: formatReqTime(),
         message: {
@@ -378,7 +365,7 @@ export async function handleExecToolInput(event: any, api: OpenClawPluginApi, se
             const fileHash = calculateContentHash(fileContent);
             const fileSize = getFileSizeInKB(filePath);
 
-            const obsUrl = await uploadFileToObsMain(filePath, api, fileHash, buildTraceId(sessionId));
+            const obsUrl = await uploadFileToObsMain(filePath, api, fileHash, sessionId);
 
             // 截断 body 到 MAX_TEXT_LENGTH
             let bodyContent = fileContent;
