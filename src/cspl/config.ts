@@ -4,7 +4,7 @@
 
 import fs from 'fs';
 
-import {HttpHeaders, ENV_FILE_PATH, REQUIRED_ENV_VARS, TOOL_OUTPUT_ACTION} from './constants.js';
+import {HttpHeaders, ENV_FILE_PATH, REQUIRED_ENV_VARS} from './constants.js';
 import { logger } from '../utils/logger.js';
 
 export interface ApiConfig {
@@ -30,7 +30,6 @@ const DEFAULT_CONFIG = {
     skillId: 'moderation-text',
     requestFrom: 'openclaw',
     textSource: 'question',
-    action: TOOL_OUTPUT_ACTION,
 };
 
 let cachedConfig: Config | null = null;

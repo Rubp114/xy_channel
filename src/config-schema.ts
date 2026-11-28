@@ -61,6 +61,7 @@ export const xyConfigSchema = {
       items: { type: "string" },
       description: "A2A sessionIds that never change (e.g. [\"00000000\"]). For these, clearContext triggers an explicit openclaw session reset (sessions.reset) to isolate context. Set to [] to disable.",
       default: ["00000000"],
+    },
     reconnectBaseMs: {
       type: "number",
       description: "Base delay in ms for WebSocket reconnect backoff (full jitter)",

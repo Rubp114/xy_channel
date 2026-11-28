@@ -17,6 +17,7 @@
   ],
   "scripts": {
     "build": "node build.mjs build",
+    "prepack": "npm run build",
     "test": "vitest run"
   },
   "keywords": [
