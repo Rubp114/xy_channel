@@ -13474,7 +13474,7 @@ function cleanupOldLogs() {
 }
 function enforceTotalCap() {
   try {
-    const activePath = getLogFilePath(currentDate);
+    const activePaths = /* @__PURE__ */ new Set([getLogFilePath(currentDate), getA2ALogFilePath(currentDate)]);
     const files = [];
     for (const f3 of readdirSync(LOG_DIR)) {
       if (!(f3.startsWith(LOG_PREFIX) || f3.startsWith(A2A_LOG_PREFIX)) || !f3.endsWith(".log")) continue;
@@ -13490,7 +13490,7 @@ function enforceTotalCap() {
     files.sort((a, b) => a.mtimeMs - b.mtimeMs);
     for (const f3 of files) {
       if (total <= MAX_TOTAL_BYTES) break;
-      if (f3.fp === activePath) continue;
+      if (activePaths.has(f3.fp)) continue;
       try {
         unlinkSync(f3.fp);
         total -= f3.size;
@@ -13502,7 +13502,6 @@ function enforceTotalCap() {
 }
 var currentDate = getTodayDateStr();
 var dest = import_pino.default.destination({ dest: getLogFilePath(currentDate), sync: false, mkdir: true });
-var a2aDest = import_pino.default.destination({ dest: getA2ALogFilePath(currentDate), sync: false, mkdir: true });
 cleanupOldLogs();
 var cleanupTimer = setInterval(cleanupOldLogs, 6 * 60 * 60 * 1e3);
 cleanupTimer.unref?.();
@@ -13525,13 +13524,14 @@ function rotateForSize() {
   currentFileBytes = 0;
   enforceTotalCap();
 }
+var a2aDest = import_pino.default.destination({ dest: getA2ALogFilePath(currentDate), sync: false, mkdir: true });
 function checkRotation() {
   const today = getTodayDateStr();
   if (today !== currentDate) {
     currentDate = today;
     dest.reopen(getLogFilePath(today));
-    currentFileBytes = 0;
     a2aDest.reopen(getA2ALogFilePath(today));
+    currentFileBytes = 0;
     cleanupOldLogs();
     return;
   }
@@ -13713,8 +13713,6 @@ var wrapper_default = import_websocket.default;
 import { EventEmitter } from "events";
 
 // src/transport/heartbeat.ts
-var CLOCK_JUMP_CHECK_INTERVAL_MS = 1e3;
-var CLOCK_JUMP_THRESHOLD_MS = 5e3;
 var HeartbeatManager = class {
   constructor(ws, config, onTimeout, serverName = "unknown", logFn, errorFn, onHeartbeatSuccess) {
     this.ws = ws;
@@ -13733,10 +13731,6 @@ var HeartbeatManager = class {
   intervalTimer = null;
   timeoutTimer = null;
   lastPongTime = 0;
-  // 时钟跳变探测器状态
-  clockJumpTimer = null;
-  lastWallMs = 0;
-  lastMonoNs = 0n;
   // Logging functions following feishu pattern
   log;
   error;
@@ -13755,17 +13749,8 @@ var HeartbeatManager = class {
       this.onHeartbeatSuccess?.();
     });
     this.intervalTimer = setInterval(() => {
-      const gap = Date.now() - this.lastPongTime;
-      if (this.lastPongTime > 0 && gap > this.config.interval + this.config.timeout) {
-        this.error(
-          `Stale connection detected for ${this.serverName}: no pong for ${gap}ms (exceeds ${this.config.interval + this.config.timeout}ms), forcing reconnect`
-        );
-        this.onTimeout();
-        return;
-      }
       this.sendHeartbeat();
     }, this.config.interval);
-    this.startClockJumpDetector();
     this.log(`[DEBUG] Heartbeat started for ${this.serverName}: interval=${this.config.interval}ms`);
   }
   /**
@@ -13780,56 +13765,7 @@ var HeartbeatManager = class {
       clearTimeout(this.timeoutTimer);
       this.timeoutTimer = null;
     }
-    this.stopClockJumpDetector();
     this.log(`[DEBUG] Heartbeat stopped for ${this.serverName}`);
-  }
-  /**
-   * 时钟跳变探测器（快照冻结/恢复场景）。
-   *
-   * Node/libuv 定时器基于单调时钟（CLOCK_MONOTONIC），VM 快照冻结期间
-   * 单调时钟停走，恢复后挂起的 interval 还需等完剩余延迟才触发——
-   * 30s 心跳 interval 意味着死链发现延迟 0-30s（本 tick 自身也是单调
-   * 定时器，恢复后最迟 ~1s 内触发，把发现延迟从 0-30s 压到 ~1s）。
-   *
-   * 每个 tick 对比墙钟（Date.now）与单调时钟（hrtime）的增量：
-   * 墙钟相对单调时钟前跳超过阈值，即判定进程刚从快照冻结中恢复：
-   * - 距上次 pong 已超一个心跳周期 → 直接判死链，立即 onTimeout 重连；
-   * - 否则连接可能仍存活，立即发一次心跳探测（timeout 兜底）。
-   */
-  startClockJumpDetector() {
-    this.stopClockJumpDetector();
-    this.lastWallMs = Date.now();
-    this.lastMonoNs = process.hrtime.bigint();
-    this.clockJumpTimer = setInterval(() => {
-      const nowWallMs = Date.now();
-      const nowMonoNs = process.hrtime.bigint();
-      const wallDeltaMs = nowWallMs - this.lastWallMs;
-      const monoDeltaMs = Number(nowMonoNs - this.lastMonoNs) / 1e6;
-      this.lastWallMs = nowWallMs;
-      this.lastMonoNs = nowMonoNs;
-      const jumpMs = wallDeltaMs - monoDeltaMs;
-      if (jumpMs <= CLOCK_JUMP_THRESHOLD_MS) return;
-      this.log(
-        `[CLOCK-JUMP] Wall clock jumped forward ${Math.round(jumpMs)}ms (wall +${Math.round(wallDeltaMs)}ms, mono +${Math.round(monoDeltaMs)}ms) \u2014 snapshot freeze/resume detected`
-      );
-      const gapMs = nowWallMs - this.lastPongTime;
-      if (this.lastPongTime > 0 && gapMs > this.config.interval + this.config.timeout) {
-        this.error(
-          `Stale connection detected for ${this.serverName} after clock jump: no pong for ${gapMs}ms (exceeds ${this.config.interval + this.config.timeout}ms), forcing reconnect`
-        );
-        this.onTimeout();
-      } else {
-        this.log(`[CLOCK-JUMP] Gap since last pong is ${gapMs}ms (within tolerance), sending immediate heartbeat probe`);
-        this.sendHeartbeat();
-      }
-    }, CLOCK_JUMP_CHECK_INTERVAL_MS);
-    this.clockJumpTimer.unref?.();
-  }
-  stopClockJumpDetector() {
-    if (this.clockJumpTimer) {
-      clearInterval(this.clockJumpTimer);
-      this.clockJumpTimer = null;
-    }
   }
   /**
    * Send a heartbeat ping.
@@ -13840,30 +13776,14 @@ var HeartbeatManager = class {
       return;
     }
     try {
-      const message = typeof this.config.message === "function" ? this.config.message() : this.config.message;
-      this.ws.send(message);
+      this.ws.send(this.config.message);
       this.ws.ping();
-      if (this.timeoutTimer) {
-        clearTimeout(this.timeoutTimer);
-        this.timeoutTimer = null;
-      }
       this.timeoutTimer = setTimeout(() => {
         this.error(`Heartbeat timeout for ${this.serverName}`);
         this.onTimeout();
       }, this.config.timeout);
     } catch (error) {
       this.error(`Failed to send heartbeat for ${this.serverName}:`, error);
-    }
-  }
-  /**
-   * External notification of connection activity (e.g. app-level heartbeat response received).
-   * Updates liveness state and cancels the pending timeout timer.
-   */
-  notifyActivity() {
-    this.lastPongTime = Date.now();
-    if (this.timeoutTimer) {
-      clearTimeout(this.timeoutTimer);
-      this.timeoutTimer = null;
     }
   }
   /**
@@ -14037,7 +13957,7 @@ var XYWebSocketManager = class extends EventEmitter {
   getConnectionDiagnostics() {
     const cacheKey = `${this.config.apiKey}-${this.config.agentId}`;
     const connectionDiag = this.getConnectionDiagnostic();
-    const totalEventListeners = this.listenerCount("message") + this.listenerCount("connected") + this.listenerCount("disconnected") + this.listenerCount("error") + this.listenerCount("ready") + this.listenerCount("data-event") + this.listenerCount("ask-user-response") + this.listenerCount("gui-agent-response") + this.listenerCount("agent-as-skill-response");
+    const totalEventListeners = this.listenerCount("message") + this.listenerCount("connected") + this.listenerCount("disconnected") + this.listenerCount("error") + this.listenerCount("ready") + this.listenerCount("data-event") + this.listenerCount("gui-agent-response") + this.listenerCount("agent-as-skill-response");
     return {
       cacheKey,
       connection: connectionDiag,
@@ -14151,21 +14071,12 @@ var XYWebSocketManager = class extends EventEmitter {
         resolve();
       });
       ws.on("message", (data) => {
-        if (this.ws !== ws) return;
         this.handleMessage(data);
       });
       ws.on("close", (code, reason) => {
-        if (this.ws !== ws) {
-          this.log("Ignoring close event from stale connection");
-          return;
-        }
         this.handleClose(code, reason.toString());
       });
       ws.on("error", (error) => {
-        if (this.ws !== ws) {
-          this.log(`Ignoring error from stale connection: ${error.message}`);
-          return;
-        }
         this.handleError(error);
         if (!this.state.connected) {
           clearTimeout(connectTimeout);
@@ -14211,35 +14122,13 @@ var XYWebSocketManager = class extends EventEmitter {
       }, 1e4);
     }
     this.startHeartbeat();
-    try {
-      if (this.ws && this.ws.readyState === wrapper_default.OPEN) {
-        this.ws.ping();
-        this.log("[WS-SEND] Immediate ping after init (liveness probe + early buffer flush)");
-      }
-    } catch (err) {
-      this.error("Failed to send immediate ping after init:", err);
-    }
-    try {
-      if (this.ws && this.ws.readyState === wrapper_default.OPEN) {
-        this.ws.send(
-          JSON.stringify({
-            msgType: "heartbeat",
-            agentId: this.config.agentId,
-            msgDetail: JSON.stringify({ timestamp: Date.now() })
-          })
-        );
-        this.log("[WS-SEND] Immediate app-level heartbeat after init (nudge server to flush pending)");
-      }
-    } catch (err) {
-      this.error("Failed to send immediate app-level heartbeat after init:", err);
-    }
   }
   /**
    * Start heartbeat.
    */
   startHeartbeat() {
     if (!this.ws) return;
-    this.heartbeat?.stop();
+    const hostname = os.hostname();
     const heartbeat = new HeartbeatManager(
       this.ws,
       {
@@ -14247,18 +14136,17 @@ var XYWebSocketManager = class extends EventEmitter {
         // 30 seconds
         timeout: 1e4,
         // 10 seconds
-        // 工厂函数：每次发送时现拼，时间戳取当前值（修复旧时间戳被服务端丢弃的问题）
-        message: () => JSON.stringify({
+        message: JSON.stringify({
           msgType: "heartbeat",
           agentId: this.config.agentId,
-          msgDetail: JSON.stringify({ timestamp: Date.now() })
+          msgDetail: JSON.stringify({ timestamp: Date.now(), hostname })
         })
       },
       () => {
         this.error("Heartbeat timeout, reconnecting...");
         if (this.ws && (this.ws.readyState === wrapper_default.OPEN || this.ws.readyState === wrapper_default.CONNECTING)) {
-          this.log("Terminating connection due to heartbeat timeout");
-          this.ws.terminate();
+          this.log("Closing connection due to heartbeat timeout");
+          this.ws.close();
         } else {
           this.reconnectServer();
         }
@@ -14266,20 +14154,10 @@ var XYWebSocketManager = class extends EventEmitter {
       "websocket",
       this.log,
       this.error,
-      () => this.handleHeartbeatActivity()
+      this.onHealthEvent
     );
     heartbeat.start();
     this.heartbeat = heartbeat;
-  }
-  toAskUserResponse(item) {
-    if (item?.header?.namespace !== "AgentEvent" || item?.header?.name !== "InvokeRsp") {
-      return null;
-    }
-    const payload = item?.payload;
-    if (!payload || typeof payload.ask_user_id !== "string" || !payload.ask_user_id) {
-      return null;
-    }
-    return payload;
   }
   toUploadExeDataEvent(item) {
     const outputs = item?.payload?.outputs ?? {};
@@ -14429,11 +14307,8 @@ ${part.text}`
       if (Array.isArray(parsed.events)) {
         const eventSessionId = parsed.session?.sessionId || parsed.sessionId;
         for (const item of parsed.events) {
-          const askUserResponse = this.toAskUserResponse(item);
           const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, eventSessionId ?? "");
-          if (askUserResponse) {
-            this.emit("ask-user-response", askUserResponse);
-          } else if (crossDeviceTaskResult) {
+          if (crossDeviceTaskResult) {
             this.emit("cross-device-task-result", crossDeviceTaskResult);
           }
         }
@@ -14475,14 +14350,10 @@ ${part.text}`
             for (const item of events) {
               log.log(`[XY] Raw event: header=${JSON.stringify(item?.header)}, payloadKeys=${Object.keys(item?.payload ?? {}).join(",")}`);
               const dataEvent = this.toUploadExeDataEvent(item);
-              const askUserResponse = this.toAskUserResponse(item);
               const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, sessionId);
               if (dataEvent) {
                 log.log(`[XY] Emitting data-event, intentName: ${dataEvent.intentName}, status: ${dataEvent.status}, size: ${JSON.stringify(dataEvent).length} bytes`);
                 this.emit("data-event", dataEvent);
-              } else if (askUserResponse) {
-                log.log(`[XY] AgentEvent.InvokeRsp detected, emitting ask-user-response, askUserId=${askUserResponse.ask_user_id}`);
-                this.emit("ask-user-response", askUserResponse);
               } else if (crossDeviceTaskResult) {
                 this.emit("cross-device-task-result", crossDeviceTaskResult);
               } else if (item.header?.namespace === "ClawAgent" && item.header?.name === "InvokeJarvisGUIAgentResponse") {
@@ -14570,8 +14441,7 @@ ${part.text}`
       log.log(`[XY] Message type: Wrapped, msgType: ${inboundMsg.msgType}`);
       if (inboundMsg.msgType === "heartbeat") {
         log.log("[XY] Received heartbeat response");
-        this.heartbeat?.notifyActivity();
-        this.handleHeartbeatActivity();
+        this.onHealthEvent?.();
         return;
       }
       if (inboundMsg.msgType === "data") {
@@ -14590,11 +14460,8 @@ ${part.text}`
           if (Array.isArray(parsedDetail.events)) {
             const eventSessionId = parsedDetail.session?.sessionId || inboundMsg.sessionId || parsedDetail.sessionId;
             for (const item of parsedDetail.events) {
-              const askUserResponse = this.toAskUserResponse(item);
               const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, eventSessionId ?? "");
-              if (askUserResponse) {
-                this.emit("ask-user-response", askUserResponse);
-              } else if (crossDeviceTaskResult) {
+              if (crossDeviceTaskResult) {
                 this.emit("cross-device-task-result", crossDeviceTaskResult);
               }
             }
@@ -14613,7 +14480,6 @@ ${part.text}`
               for (const item of events) {
                 log.log(`[XY] Raw event (wrapped): header=${JSON.stringify(item?.header)}, payloadKeys=${Object.keys(item?.payload ?? {}).join(",")}`);
                 const dataEvent = this.toUploadExeDataEvent(item);
-                const askUserResponse = this.toAskUserResponse(item);
                 const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(
                   item,
                   inboundMsg.sessionId || a2aRequest2.params?.sessionId
@@ -14621,9 +14487,6 @@ ${part.text}`
                 if (dataEvent) {
                   log.log(`[XY] Emitting data-event, intentName: ${dataEvent.intentName}, status: ${dataEvent.status}, size: ${JSON.stringify(dataEvent).length} bytes`);
                   this.emit("data-event", dataEvent);
-                } else if (askUserResponse) {
-                  log.log(`[XY] AgentEvent.InvokeRsp detected (wrapped), emitting ask-user-response, askUserId=${askUserResponse.ask_user_id}`);
-                  this.emit("ask-user-response", askUserResponse);
                 } else if (crossDeviceTaskResult) {
                   this.emit("cross-device-task-result", crossDeviceTaskResult);
                 } else if (item.header?.namespace === "ClawAgent" && item.header?.name === "InvokeJarvisGUIAgentResponse") {
@@ -14725,24 +14588,6 @@ ${part.text}`
     }
   }
   /**
-   * Handle connection activity (protocol pong or app-level heartbeat response).
-   * Reports health and flushes the reconnect buffer early instead of waiting the full 10s.
-   */
-  handleHeartbeatActivity() {
-    this.onHealthEvent?.();
-    if (this.isBuffering && this.reconnectBufferTimer) {
-      clearTimeout(this.reconnectBufferTimer);
-      this.reconnectBufferTimer = null;
-      this.messageQueue.flush((msg) => {
-        if (this.ws && this.ws.readyState === wrapper_default.OPEN) {
-          this.ws.send(JSON.stringify(msg));
-        }
-      });
-      this.isBuffering = false;
-      this.log("[MessageQueue] Activity detected during buffer period, flushed queue early");
-    }
-  }
-  /**
    * Handle connection error.
    */
   handleError(error) {
@@ -14750,9 +14595,15 @@ ${part.text}`
     this.emit("error", error);
   }
   /**
-   * Reconnect with fast-retry-then-backoff schedule.
-   * 前几次快速重试（0.5/1/1/2/4s + 随机抖动），之后指数退避封顶 30s。
-   * 修复：旧版首次就 1s 起步指数增长，503 场景累计 31s+10s 缓冲 = 42s 才恢复。
+   * Reconnect with exponential backoff + full jitter.
+   *
+   * A server outage makes every client detect the drop at the same moment and
+   * start from the same attempt counter, so a deterministic delay sequence
+   * (1s, 2s, 4s, ...) makes all clients reconnect in lock-step waves. Full
+   * jitter draws each delay uniformly from [0, window] so the herd spreads
+   * out and stays decorrelated even after many rounds at the cap:
+   * - attempt 1: window = reconnectFirstMaxMs (dilutes the first burst)
+   * - attempt ≥2: window = min(base * 2^(n-1), reconnectMaxMs)
    */
   reconnectServer() {
     if (this.isShuttingDown) return;
@@ -14761,11 +14612,13 @@ ${part.text}`
       this.log("Cleared existing reconnect timer to prevent concurrent reconnection");
     }
     this.state.reconnectAttempts++;
-    const FAST_RETRY_SCHEDULE = [500, 1e3, 1e3, 2e3, 4e3];
     const attempt = this.state.reconnectAttempts;
-    const base = attempt <= FAST_RETRY_SCHEDULE.length ? FAST_RETRY_SCHEDULE[attempt - 1] : Math.min(1e3 * Math.pow(2, attempt - 1), 3e4);
-    const delay = base + Math.floor(Math.random() * 250);
-    this.log(`Reconnecting in ${delay}ms (attempt ${attempt})...`);
+    const baseMs = this.config.reconnectBaseMs ?? 1e3;
+    const maxMs = this.config.reconnectMaxMs ?? 3e4;
+    const firstMaxMs = this.config.reconnectFirstMaxMs ?? 3e3;
+    const windowMs = attempt === 1 ? firstMaxMs : Math.min(baseMs * Math.pow(2, attempt - 1), maxMs);
+    const delay = Math.round(Math.random() * windowMs);
+    this.log(`Reconnecting in ${delay}ms (attempt ${attempt}, window ${windowMs}ms)...`);
     const timer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connectServer(this.config.wsUrl).catch((error) => {
@@ -16542,15 +16395,16 @@ async function sendWsFrame(params) {
         `[A2A-OUT] msgType=${outboundMessage.msgType}, agentId=${outboundMessage.agentId}, sessionId=${sessionId}, taskId=${taskId}, size=${outboundMessage.msgDetail.length}`
       );
       const commands = extractCommands(frame);
-      const memoryFileReadCommands = commands.filter(isMemoryFileReadCommand);
-      if (memoryFileReadCommands.length > 0) {
-        for (const command of memoryFileReadCommands) {
-          const ans = command.payload?.ans;
-          const contentBytes = Number.isSafeInteger(ans?.contentBytes) ? ans.contentBytes : "none";
-          const errorCode = typeof ans?.errorCode === "string" ? ans.errorCode : "none";
-          log.log(
-            `[A2A-OUT] command action=MemoryFileRead, ok=${ans?.ok === true}, contentBytes=${contentBytes}, errorCode=${errorCode}`
-          );
+      if (commands.some(isMemoryFileReadCommand)) {
+        log.log(`[A2A-OUT] msgDetail omitted for MemoryFileRead response`);
+        for (const command of commands) {
+          if (isMemoryFileReadCommand(command)) {
+            const answer = command.payload?.ans;
+            const contentBytes = typeof answer?.contentBytes === "number" && Number.isFinite(answer.contentBytes) ? answer.contentBytes : typeof answer?.content === "string" ? Buffer.byteLength(answer.content, "utf8") : 0;
+            log.log(`[A2A-OUT] action=MemoryFileRead, ok=${answer?.ok === true}, contentBytes=${contentBytes}`);
+          } else {
+            log.log(`[A2A-OUT] command=${JSON.stringify(command)}`);
+          }
         }
       } else {
         log.log(`[A2A-OUT] msgDetail=${buildLoggableMsgDetail(frame)}`);

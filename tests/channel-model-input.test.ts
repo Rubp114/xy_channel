@@ -28,7 +28,7 @@ function toolNames(): string[] {
 }
 
 describe("request-scoped image tool visibility", () => {
-  it.each(["phone", "web", "winpc", "smartWatch"])(
+  it.each(["phone", "web", "winpc", "2in1"])(
     "hides only image_reading for native images on %s", async (deviceType) => {
       const legacyTools = await runWithSessionContext(context(deviceType, ["text"]), async () => toolNames());
       const nativeTools = await runWithSessionContext(context(deviceType, ["text", "image"]), async () => toolNames());
@@ -44,16 +44,6 @@ describe("request-scoped image tool visibility", () => {
       expect(names).toContain("image_reading");
     },
   );
-
-  // ask_user 当前处于屏蔽状态（ALWAYS_HIDDEN_TOOLS）：任何版本均不可见
-  it.each([
-    ["11.7.9.330", false], ["11.7.10.0", false], ["11.7.10.211", false],
-    ["11.7.10.212", false], ["11.7.10.213", false],
-  ])("preserves upstream version-gated tools for %s independently of image capability", async (appVer, visible) => {
-    const names = await runWithSessionContext(context("phone", ["image"], appVer), async () => toolNames());
-    expect(names.includes("ask_user")).toBe(visible);
-    expect(names).not.toContain("image_reading");
-  });
 
   it("does not mutate the static list across requests or affect calls without A2A context", async () => {
     await runWithSessionContext(context("phone", ["image"]), async () => {

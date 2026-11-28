@@ -13,7 +13,9 @@ export interface HandleXYMessageParams {
     acquireDispatchInitGate?: () => Promise<() => void>;
     /** steer 回退前等待同 session 的旧 dispatch 收尾，避免并发争用会话写锁。 */
     waitForPreviousTurn?: () => Promise<void>;
+    /** Attachments/model changes must enter a complete turn instead of text-only steer. */
     forceNewTurn?: boolean;
+    /** Commit the monitor's model snapshot only after this complete turn is admitted. */
     onTurnAdmitted?: () => void;
 }
 /**

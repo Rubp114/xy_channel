@@ -79,11 +79,12 @@ function cleanupOldLogs(): void {
 }
 
 // ── Enforce total size cap ──
-// 所有 xiaoyi-channel-*.log 加起来超过 MAX_TOTAL_BYTES 时，按 mtime 从最旧的
-// 文件开始删，直到回到上限以内。正在写入的当天文件永不删除（否则会静默丢日志）。
+// 所有 xiaoyi-channel-*.log / A2A-OUT-*.log 加起来超过 MAX_TOTAL_BYTES 时，
+// 按 mtime 从最旧的文件开始删，直到回到上限以内。正在写入的当天文件永不删除
+// （否则会静默丢日志）。
 function enforceTotalCap(): void {
   try {
-    const activePath = getLogFilePath(currentDate);
+    const activePaths = new Set([getLogFilePath(currentDate), getA2ALogFilePath(currentDate)]);
     const files: { fp: string; size: number; mtimeMs: number }[] = [];
     for (const f of readdirSync(LOG_DIR)) {
       if (!(f.startsWith(LOG_PREFIX) || f.startsWith(A2A_LOG_PREFIX)) || !f.endsWith(".log")) continue;
@@ -98,7 +99,7 @@ function enforceTotalCap(): void {
     files.sort((a, b) => a.mtimeMs - b.mtimeMs);
     for (const f of files) {
       if (total <= MAX_TOTAL_BYTES) break;
-      if (f.fp === activePath) continue;
+      if (activePaths.has(f.fp)) continue;
       try {
         unlinkSync(f.fp);
         total -= f.size;
@@ -110,7 +111,6 @@ function enforceTotalCap(): void {
 // ── File destination with daily rotation ──
 let currentDate = getTodayDateStr();
 const dest = pino.destination({ dest: getLogFilePath(currentDate), sync: false, mkdir: true });
-const a2aDest = pino.destination({ dest: getA2ALogFilePath(currentDate), sync: false, mkdir: true });
 
 // Run cleanup on module load（放在 currentDate 声明之后，enforceTotalCap 依赖它）
 cleanupOldLogs();
@@ -144,14 +144,17 @@ function rotateForSize(): void {
   enforceTotalCap();
 }
 
+// A2A-OUT 独立文件目的地（按日轮转；纳入 cleanupOldLogs / enforceTotalCap 治理）
+const a2aDest = pino.destination({ dest: getA2ALogFilePath(currentDate), sync: false, mkdir: true });
+
 // ── Rotation check ──
 function checkRotation(): void {
   const today = getTodayDateStr();
   if (today !== currentDate) {
     currentDate = today;
     dest.reopen(getLogFilePath(today));
-    currentFileBytes = 0;
     a2aDest.reopen(getA2ALogFilePath(today));
+    currentFileBytes = 0;
     cleanupOldLogs();
     return;
   }

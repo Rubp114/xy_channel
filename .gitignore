@@ -2,6 +2,9 @@
 node_modules/
 package-lock.json
 
+# Build output
+dist/
+
 # Documentation
 *.md
 
@@ -12,8 +15,8 @@ package-lock.json
 .DS_Store
 Thumbs.db
 
-
-*.tgz
-
 # Python
 __pycache__/
+
+# 打包产物不入库
+*.tgz

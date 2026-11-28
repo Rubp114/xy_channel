@@ -260,6 +260,7 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
 
   let hasSentResponse = false;
   let finalSent = false;
+
   // 思考快照/段文本状态由 utils/reasoning-segment.ts 按 taskId 维护（含分段
   // 基线剥离与开放标记），供 onReasoningStream 增量下发与 onReasoningEnd /
   // 分段边界的收尾帧携带段文本。
@@ -500,8 +501,8 @@ export function createXYReplyDispatcher(params: CreateXYReplyDispatcherParams): 
           scopedLog().log(
             `[ON-IDLE] Waiting for subagent completions ${waitState.deliveredCompletions}/${waitState.expectedCompletions}, suppressing final:true`,
           );
-          // 会话不结束：转入 waiting-subagent。状态保活帧已全部下线 ——
-          // 此处不再下发等待保活帧，心跳也不再启动（startStatusHeartbeat 为 no-op）。
+          // 会话不结束：转入 waiting-subagent。一次性等待保活帧已下线；
+          // 等待期间的保活由 30s 保活卡心跳承担（waiting-subagent 在状态门内）。
           setSessionState(sessionId, "waiting-subagent");
           return;
         }

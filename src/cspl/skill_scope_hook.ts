@@ -4,20 +4,49 @@
 
 import crypto from 'crypto';
 import type {OpenClawPluginApi} from "openclaw/plugin-sdk";
-import type {BeforeInstallEvent, BeforeInstallResult} from './constants.js';
+
+// Types matching PluginHookBeforeInstallEvent / PluginHookBeforeInstallResult in the SDK
+// (not yet publicly exported from openclaw/plugin-sdk)
+interface PluginInstallFinding {
+    ruleId: string;
+    severity: "info" | "warn" | "critical";
+    file: string;
+    line: number;
+    message: string;
+}
+interface BeforeInstallEvent {
+    targetType: string;
+    targetName: string;
+    sourcePath: string;
+    sourcePathKind: string;
+    origin?: string;
+    request: { kind: string; mode: string };
+    builtinScan: { status: string; scannedFiles: number; critical: number; warn: number; info: number; findings: PluginInstallFinding[] };
+    skill?: { installId: string };
+    plugin?: { pluginId: string; contentType: string };
+}
+interface BeforeInstallResult {
+    block?: boolean;
+    blockReason?: string;
+    findings?: PluginInstallFinding[];
+}
+interface BeforeInstallContext {
+    targetType: string;
+    requestKind: string;
+    origin?: string;
+    sessionId?: string;
+}
 
 import {getConfig} from './config.js';
 import {callSkillScanApi} from './call_api.js';
-import {calculateProjectHash, createAndUploadZip, getOriginType, loadTargetContent, parseSecurityResult, formatReqTime, resolveCallName} from './utils.js';
-import {API_URL_SUFFIX, SCENE_ID} from './constants.js';
+import {calculateProjectHash, createAndUploadZip, getOriginType, loadSkillContent, parseSecurityResult, formatReqTime} from './utils.js';
+import {API_URL_SUFFIX} from './constants.js';
 
 export default function register(api: OpenClawPluginApi) {
-    api.on("before_install", async (event: BeforeInstallEvent, ctx: any): Promise<BeforeInstallResult | void> => {
+    api.on("before_install", async (event: BeforeInstallEvent, ctx: BeforeInstallContext): Promise<BeforeInstallResult | void> => {
         api.logger.info(`[ai-security-plugin][skill_scope_hook]  before_install event: targetType=${event.targetType}, targetName=${event.targetName}`);
-        // sessionID 从 ctx 获取；SDK 的 PluginHookBeforeInstallContext 不含 sessionId,
-        // 缺失时降级为随机 uuid —— 否则 undefined 写入 HTTP header 会被 Node 拒绝抛异常,
-        // 导致 plugin 安装未经扫描即被误阻断、skill 安装静默跳过扫描
-        const sessionId = ctx?.sessionId || generateUUid();
+        // sessionID 从 ctx 获取
+        const sessionId = ctx?.sessionId;
         api.logger.info(`[ai-security-plugin][skill_scope_hook] Session ID: ${sessionId}`);
         try {
             const config = getConfig(api);
@@ -38,14 +67,12 @@ export default function register(api: OpenClawPluginApi) {
 
             api.logger.info(`[ai-security-plugin][skill_scope_hook] Zip uploaded, URL: ${downloadUrl}`);
 
-            const {content: skillContent, manifestName} = loadTargetContent(sourcePath);
-            const callName = resolveCallName(manifestName);
-            api.logger.info(`[ai-security-plugin][skill_scope_hook] Description loaded, manifest: ${manifestName}, callObj.name: ${callName}`);
+            const skillContent = loadSkillContent(sourcePath);
 
             api.logger.info(`[ai-security-plugin][skill_scope_hook] Calling security scan API`);
 
             const payload = buildSkillScanPayload(targetHash, downloadUrl,
-                skillType, skillContent, apiConfig, sessionId, callName);
+                skillType, skillContent, apiConfig, sessionId);
             const response = await callSkillScanApi(API_URL_SUFFIX, payload, api, sessionId);
 
             const result = parseSecurityResult(response);
@@ -60,14 +87,12 @@ export default function register(api: OpenClawPluginApi) {
                     blockReason: `Security scan detected malicious content in "${targetName}". Installation blocked for security reasons.`,
                     findings: [
                         {
-                            ruleId: 'skill-scope-security-scan',
+                            ruleId: 'cspl-skill-scope',
                             severity: 'critical',
-                            category: 'security',
                             file: sourcePath,
                             line: 0,
                             message: `The skill "${targetName}" has been flagged as potentially malicious and cannot be installed.`
-                        }
-                    ]
+                        }                    ]
                 };
             }
 
@@ -84,14 +109,12 @@ export default function register(api: OpenClawPluginApi) {
                     blockReason: `Security scan failed: ${err.message}. Plugin installation is blocked for safety.`,
                     findings: [
                         {
-                            ruleId: 'skill-scope-scan-error',
+                            ruleId: 'cspl-scan-error',
                             severity: 'critical',
-                            category: 'error',
                             file: event.sourcePath || '',
                             line: 0,
                             message: `Security scan error: ${err.message}`
-                        }
-                    ]
+                        }                    ]
                 };
             }
 
@@ -111,27 +134,25 @@ export function buildSkillScanPayload(
     skillType: string,
     skillContent: string,
     config: { apiKey: string; uid: string; serviceUrl: string; },
-    sessionID: string,
-    callName: string = "install_skill"
+    sessionID: string
 ): {
     taskID: string; sessionID: string; interActionID: number; uid: string; businessID: string;
-    sceneID: string; reqTime: string; action: string; checkPoint: number; message: object
+    reqTime: string; action: string; checkPoint: number; message: object
 } {
     const taskID = generateUUid();
     const interActionID = 1;
     const action = "XIAOYI_CLAW";
     const businessID = "voiceassistant";
-    const sceneID = SCENE_ID;
     const reqTime = formatReqTime();
     const checkPoint = 7;
     const availableSkillBodyLen = 10240;
     const skillBody = skillContent.length > availableSkillBodyLen ? skillContent.substring(0, availableSkillBodyLen) : skillContent;
     const callObj: Record<string, any> = {
-        type: "function",
-        name: callName,        // install_skill | install_plugin
-        arguments: "{}",       // 保持默认值
-        index: 0,              // 保持默认值
-        id: "0",               // 保持默认值
+        type: "function",       // 保持默认值
+        name: "install_skill",  // 保持默认值
+        arguments: "{}",        // 保持默认值
+        index: 0,               // 保持默认值
+        id: "0",                // 保持默认值
         file: [
             {
                 type: "doc",   // 保持默认值
@@ -149,7 +170,6 @@ export function buildSkillScanPayload(
         interActionID: interActionID,
         uid: config.uid,
         businessID: businessID,
-        sceneID: sceneID,
         action: action,
         reqTime: reqTime,
         checkPoint: checkPoint,

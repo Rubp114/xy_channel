@@ -1,4 +1,10 @@
 import type { EnvConfig, FormattedSkill, ToolSearchResult } from "./types.js";
+export declare const MEDIA_ATTACHED_LINE_RE: RegExp;
+export declare const MEDIA_ATTACHED_FILES_HEADER_RE: RegExp;
+export declare const UNTRUSTED_METADATA_BLOCK_RE: RegExp;
+export declare const SENDER_METADATA_BLOCK_RE: RegExp;
+export declare const ROOM_EVENT_PREFIX_RE: RegExp;
+export declare const FILE_BLOCK_RE: RegExp;
 export declare function extractUserQuery(fullPrompt: string): string;
 export declare function readEnvFile(filePath: string): EnvConfig;
 export declare function getSkillsInDirectory(dirPath: string): string[];

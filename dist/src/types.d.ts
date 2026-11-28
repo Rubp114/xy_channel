@@ -17,6 +17,12 @@ export interface XYChannelConfig {
      * 显式配置为空数组可禁用该行为。
      */
     pinnedSessionIds: string[];
+    /** Base delay in ms for reconnect backoff (default 1000) */
+    reconnectBaseMs?: number;
+    /** Max reconnect delay cap in ms (default 30000) */
+    reconnectMaxMs?: number;
+    /** First reconnect attempt is uniformly spread over [0, this] ms to dilute mass-reconnect storms (default 3000) */
+    reconnectFirstMaxMs?: number;
 }
 export interface A2AJsonRpcRequest {
     jsonrpc: "2.0";
@@ -74,17 +80,6 @@ export interface A2ADataEvent {
     intentName: string;
     outputs: Record<string, any>;
     status: "success" | "failed";
-}
-/** AgentEvent.InvokeRsp 中 ask_user 卡片的用户反馈。 */
-export interface AskUserResponse {
-    user_cancel?: boolean;
-    responder_device_id?: string;
-    ask_user_id: string;
-    answers?: Array<{
-        question_id: string;
-        selected_options?: string[];
-        custom_text?: string | null;
-    }>;
 }
 export interface CrossDeviceTaskResultEvent {
     sessionId: string;

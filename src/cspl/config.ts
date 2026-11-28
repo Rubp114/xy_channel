@@ -4,7 +4,7 @@
 
 import fs from 'fs';
 
-import {HttpHeaders, ENV_FILE_PATH, REQUIRED_ENV_VARS} from './constants.js';
+import {HttpHeaders, ENV_FILE_PATH, REQUIRED_ENV_VARS, TOOL_OUTPUT_ACTION} from './constants.js';
 import { logger } from '../utils/logger.js';
 
 export interface ApiConfig {
@@ -27,9 +27,10 @@ const DEFAULT_CONFIG = {
         timeout: 5000,
     },
     headers: {} as HttpHeaders,
-    skillId: 'moderation-text',
+    skillId: 'ai-security',
     requestFrom: 'openclaw',
     textSource: 'question',
+    action: TOOL_OUTPUT_ACTION,
 };
 
 let cachedConfig: Config | null = null;

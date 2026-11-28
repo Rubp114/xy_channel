@@ -5,7 +5,7 @@ import { xiaoyiProvider } from "./src/provider.js";
 import { xiaoyiCompactionProvider } from "./src/compaction-provider.js";
 import { xyPlugin } from "./src/channel.js";
 import registerSentinelHook from "./src/cspl/sentinel_hook.js";
-import registerSkillScopeHook from "./plugin-scope/skill_scope_hook.js";
+import registerSkillScopeHook from "./src/cspl/skill_scope_hook.js";
 import { setXYRuntime } from "./src/runtime.js";
 import { markCronToolCall, clearCronToolCall, getCurrentSessionContext, setCronToolRunInfo, clearCronToolRunInfo, isCronActive } from "./src/tools/session-manager.js";
 import { parseCronJobIdFromSessionKey, registerCronToolGuard } from "./src/tools/cron-tool-guard.js";
@@ -40,7 +40,7 @@ import { logger, setA2AOutLogEnabled } from "./src/utils/logger.js";
 /** A2A-OUT 出站帧日志开关：true 打印 / false 关闭（唯一开关位置，改这里）。
  *  关闭后所有 [A2A-OUT] 日志被 writeLog 统一拦截丢弃，调用点同步跳过
  *  组日志字符串的开销（见 src/utils/logger.ts、conversation/outbound-gateway.ts）。 */
-const A2A_OUT_LOG_ENABLED = true;
+const A2A_OUT_LOG_ENABLED = false;
 setA2AOutLogEnabled(A2A_OUT_LOG_ENABLED);
 
 /** 从路径/文本中提取技能名：.../skills/<name> 或 .../core_skills/<name>。
@@ -703,8 +703,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       registerFullHooks(api);
       // CSPL sentinel hook: before_tool_call + after_tool_call security scanning
       registerSentinelHook(api);
-      // Skill scope hook: before_install 云端安全扫描（skill/plugin 安装前预检，
-      // 扫描 REJECT 阻断；扫描异常 skill 放行、plugin 阻断；内核侧对 hook 异常 fail-closed）
+      // CSPL skill scope hook: before_install security scanning
       registerSkillScopeHook(api);
       // Cron tool guard: rejects unsupported tools before they can produce side effects
       registerCronToolGuard(api);
@@ -718,7 +717,7 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       registerCronChangedHook(api);
       // Cron run log hook: write one line per finished cron run to /tmp/openclaw/cron-*.log
       registerCronRunLogHook(api);
-      // Skills diagnostic hook: log skill usage (detected via SKILL.md reads)
+      // Skills usage logging hook: device tool mapping + exec/bash skill path detection
       registerSkillsDiagnosticHook(api);
       // Tool status hook: push 「正在使用工具：xxx」status-update frame on every tool call
       registerToolStatusHook(api);

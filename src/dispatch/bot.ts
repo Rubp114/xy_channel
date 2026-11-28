@@ -6,7 +6,7 @@ import { callGatewayTool, resolveActiveEmbeddedRunSessionId } from "openclaw/plu
 import { getXYRuntime } from "../runtime.js";
 import { createXYReplyDispatcher } from "./reply-dispatcher.js";
 import { createLegacyReplyDispatcher } from "../legacy/reply-dispatcher.js";
-import { sendStatusUpdate as legacySendStatusUpdate, sendA2AResponse as legacySendA2AResponse } from "../legacy/formatter.js";
+import { sendStatusUpdate as legacySendStatusUpdate } from "../legacy/formatter.js";
 import { parseA2AMessage, extractTextFromParts, extractFileParts, extractPushId, extractDeviceType, extractAppVer, extractSdkApiVersion, extractModelName, extractModelInput, extractTriggerData, extractRunCrossTaskContext, isClearContextMessage, isTasksCancelMessage } from "../parser.js";
 import { downloadFilesFromParts } from "../file-download.js";
 import { isImageAttachment } from "../model-input.js";
@@ -30,6 +30,8 @@ import { markAppVersion, isLegacyAppVersion } from "../utils/app-version.js";
 import { getCurrentStatusCardSeq } from "../utils/status-card-seq.js";
 import {
   registerTask,
+  getOrCreateSession,
+  getSession,
   completeTask,
   hasActiveTask,
   bindSessionKey,
@@ -43,13 +45,63 @@ import {
   cacheXYConfig,
   getCurrentTaskId,
   getCurrentMessageId,
-  getOrCreateSession,
-  getSession,
   clearWaitState,
 } from "../conversation/conversation-manager.js";
 import { clearPendingApproval } from "../approval-bridge.js";
 import type { A2AJsonRpcRequest, XYChannelConfig } from "../types.js";
 import { logger } from "../utils/logger.js";
+
+const CHANNEL_READY_POLL_MS = 100;
+const SDK_TURN_IDLE_TIMEOUT_MS = 30_000;
+
+/** A full image/model turn must not enter the SDK's text-only steer branch. */
+async function waitForSdkTurnIdle(
+  sessionKey: string | undefined,
+  log: ReturnType<typeof logger.withContext>,
+): Promise<"idle" | "timeout" | "unavailable"> {
+  if (!sessionKey) return "unavailable";
+  const deadline = Date.now() + SDK_TURN_IDLE_TIMEOUT_MS;
+  for (;;) {
+    try {
+      if (!resolveActiveEmbeddedRunSessionId(sessionKey)) return "idle";
+    } catch (err) {
+      log.error(`[BOT-DISPATCH] Cannot verify SDK turn readiness:`, err);
+      return "unavailable";
+    }
+    if (Date.now() >= deadline) return "timeout";
+    await new Promise<void>((resolve) => setTimeout(resolve, CHANNEL_READY_POLL_MS));
+  }
+}
+
+/** Close only the rejected incoming task; an older live run keeps its state. */
+async function failBeforeDispatch(params: {
+  config: XYChannelConfig;
+  sessionId: string;
+  taskId: string;
+  messageId: string;
+  text: string;
+  stepName: string;
+}): Promise<void> {
+  const { config, sessionId, taskId, messageId, text } = params;
+  const outboundQueue = getOrCreateSession(sessionId).outboundQueue;
+  outboundQueue.enqueue({
+    taskId,
+    label: "inbound-failure-status",
+    send: () => sendStatusUpdate({
+      config, sessionId, taskId, messageId, text, state: "failed",
+    }),
+  });
+  outboundQueue.enqueue({
+    taskId,
+    label: "inbound-failure-final",
+    send: () => sendA2AResponse({
+      config, sessionId, taskId, messageId, text, append: false, final: true,
+      errorCode: 99921111, errorMessage: text,
+    }),
+  });
+  await outboundQueue.whenIdle();
+  completeTask(sessionId, taskId);
+}
 
 /**
  * Parameters for handling an XY message.
@@ -64,7 +116,9 @@ export interface HandleXYMessageParams {
   acquireDispatchInitGate?: () => Promise<() => void>;
   /** steer 回退前等待同 session 的旧 dispatch 收尾，避免并发争用会话写锁。 */
   waitForPreviousTurn?: () => Promise<void>;
+  /** Attachments/model changes must enter a complete turn instead of text-only steer. */
   forceNewTurn?: boolean;
+  /** Commit the monitor's model snapshot only after this complete turn is admitted. */
   onTurnAdmitted?: () => void;
 }
 
@@ -98,70 +152,6 @@ async function waitForPreviousTurnWithTimeoutWarning(
   }
 }
 
-const FULL_TURN_ADMISSION_TIMEOUT_MS = 30_000;
-
-async function waitForFullTurnAdmission(
-  sessionId: string,
-  sessionKey: string | undefined,
-  waitForPreviousTurn: HandleXYMessageParams["waitForPreviousTurn"],
-  log: ReturnType<typeof logger.withContext>,
-): Promise<"ready" | "busy" | "unavailable"> {
-  if (!sessionKey) return "unavailable";
-  let previousSettled = !waitForPreviousTurn;
-  let previousWaitFailed = false;
-  void waitForPreviousTurn?.().then(
-    () => { previousSettled = true; },
-    () => { previousWaitFailed = true; },
-  );
-  const deadline = Date.now() + FULL_TURN_ADMISSION_TIMEOUT_MS;
-  for (;;) {
-    if (previousWaitFailed) return "unavailable";
-    try {
-      if (previousSettled && !hasActiveTask(sessionId) && !hasWaitState(sessionId) &&
-          !resolveActiveEmbeddedRunSessionId(sessionKey)) {
-        return "ready";
-      }
-    } catch (err) {
-      log.error("[MODEL-INPUT] SDK run lookup failed:", err);
-      return "unavailable";
-    }
-    if (Date.now() >= deadline) return "busy";
-    await new Promise<void>((resolve) => setTimeout(resolve, 100));
-  }
-}
-
-async function sendAdmissionFailure(
-  identity: { config: XYChannelConfig; sessionId: string; taskId: string; messageId: string },
-  text: string,
-): Promise<void> {
-  const queue = getOrCreateSession(identity.sessionId).outboundQueue;
-  const legacy = isLegacyAppVersion(identity.taskId);
-  queue.enqueue({
-    taskId: identity.taskId,
-    label: "admission-failure-status",
-    send: () => (legacy ? legacySendStatusUpdate : sendStatusUpdate)({ ...identity, text, state: "failed" }),
-  });
-  // 高版本补发 final 起始卡（index=1，isFinal=true）关闭卡片展示，
-  // 避免端侧停留在"任务正在处理中"（对齐 0730 failBeforeDispatch）。
-  if (!legacy) {
-    queue.enqueue({
-      taskId: identity.taskId,
-      label: "admission-failure-card",
-      send: () => sendDisplayTaskCardData({
-        ...identity, index: 1, stepName: text, isFinal: true,
-      }),
-    });
-  }
-  queue.enqueue({
-    taskId: identity.taskId,
-    label: "admission-failure-final",
-    send: () => (legacy ? legacySendA2AResponse : sendA2AResponse)({
-      ...identity, text, append: false, final: true, errorCode: 99921111, errorMessage: text,
-    }),
-  });
-  await queue.whenIdle();
-}
-
 /**
  * Handle an incoming A2A message.
  * This is the main entry point for message processing.
@@ -177,7 +167,6 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
   // Get runtime (already validated in monitor.ts, but get reference for use)
   const core = getXYRuntime() as any;
 
-  let turnRegistered = false;
   try {
     // Check for special messages BEFORE parsing (these have different param structures)
     const messageMethod = message.method;
@@ -325,11 +314,12 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     }
 
     // Extract modelName if present (used by provider.ts to override model.id)
-    const modelName = extractModelName(parsed.parts)?.replace(/^xiaoyiprovider\//i, "");
-    const modelCapabilities = extractModelInput(parsed.parts);
+    const modelName = extractModelName(parsed.parts);
     if (modelName) {
       log.log(`[BOT] Extracted modelName: ${modelName}`);
     }
+    const modelCapabilities = extractModelInput(parsed.parts);
+    log.log(`[MODEL-INPUT] source=${modelCapabilities.source}, input=${modelCapabilities.input.join(",")}`);
     const runCrossTaskContext = extractRunCrossTaskContext(parsed.parts);
 
     // Resolve configuration (needed for status updates)
@@ -351,6 +341,9 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
 
     log.log(`[BOT] Resolved route, sessionKey=${route.sessionKey}`);
 
+    // Bind sessionKey→A2A identity only after full-turn admission below.
+    // Direct steer preserves the older run's subagent ownership mapping.
+
     // Check for ACP runtime binding on this A2A conversation
     const runtimeRoute = resolveRuntimeConversationBindingRoute({
       route,
@@ -366,15 +359,6 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
           : `[BOT] plugin-bound conversation ${parsed.sessionId}`,
       );
     }
-
-    const fileParts = extractFileParts(parsed.parts);
-    const imageParts = fileParts.filter(isImageAttachment);
-    const hasNativeImages = modelCapabilities.supportsNativeImages && imageParts.length > 0;
-    const requiresNewTurn = Boolean(params.forceNewTurn || hasNativeImages);
-    const identity = { config, sessionId: parsed.sessionId, taskId: parsed.taskId, messageId: parsed.messageId };
-    // 0730 对齐：入站不再单独下发 working 的 status-update —— 初始/working 帧
-    // 统一由准入后版本分流的起始卡块承担（低版本 status-update / 高版本
-    // DisplayTaskCardData），避免出现 status-update 与起始卡双发。
 
     // Extract text and files from parts
     const text = extractTextFromParts(parsed.parts);
@@ -409,28 +393,35 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     // 首条消息和 steer 回退都走此统一 dispatch 路径。
 
     // File download — for both first message and steer messages
-    let mediaPayload: ReturnType<typeof buildXYMediaPayload>;
+    let mediaPayload: ReturnType<typeof buildXYMediaPayload> = {};
+    const fileParts = extractFileParts(parsed.parts);
+    const downloadedFiles = await downloadFilesFromParts(fileParts, undefined,
+      modelCapabilities.supportsNativeImages ? { maxImageBytes: NATIVE_IMAGE_MAX_BYTES } : undefined);
+    log.log(`[BOT] Downloaded ${downloadedFiles.length} file(s)`);
+    mediaPayload = buildXYMediaPayload(downloadedFiles);
+    const imageParts = fileParts.filter(isImageAttachment);
     let nativeImages: Awaited<ReturnType<typeof loadNativeImages>> = [];
-    try {
-      const downloadedFiles = await downloadFilesFromParts(fileParts, undefined,
-        hasNativeImages ? { maxImageBytes: NATIVE_IMAGE_MAX_BYTES } : undefined);
-      log.log(`[BOT] Downloaded ${downloadedFiles.length} file(s)`);
-      mediaPayload = buildXYMediaPayload(downloadedFiles);
-
-      if (hasNativeImages) {
+    if (modelCapabilities.supportsNativeImages && imageParts.length > 0) {
+      try {
         const downloadedImages = downloadedFiles.filter(isImageAttachment);
         if (downloadedImages.length !== imageParts.length) {
           throw new NativeImageInputError("部分图片下载失败或超过大小限制，请重新上传后重试。");
         }
         nativeImages = await loadNativeImages(downloadedImages, cfg);
+        log.log(`[MODEL-INPUT] native images expected=${imageParts.length}, loaded=${nativeImages.length}`);
+      } catch (err) {
+        const text = err instanceof NativeImageInputError
+          ? err.message
+          : "图片处理失败，请检查图片格式和大小后重试。";
+        log.error(`[MODEL-INPUT] Native image preparation failed:`, err);
+        await failBeforeDispatch({
+          config, sessionId: parsed.sessionId, taskId: parsed.taskId,
+          messageId: parsed.messageId, text, stepName: "图片处理失败",
+        });
+        return;
       }
-    } catch (err) {
-      if (!requiresNewTurn) throw err;
-      const text = err instanceof NativeImageInputError ? err.message : "附件处理失败，请重新上传后重试。";
-      log.error("[MODEL-INPUT] Could not prepare attachments:", err);
-      await sendAdmissionFailure(identity, text);
-      return;
     }
+    const requiresNewTurn = params.forceNewTurn || nativeImages.length > 0;
 
     // 🔑 对于 steer 消息，将文件路径附加到消息文本中。
     // auto-reply 管道的 steer 注入只携带 prompt 文本（followupRun.prompt），
@@ -449,18 +440,24 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     //
     // 直接注入失败时，先等旧 dispatch 收尾，再落回普通 tasks/send 派发：
     // 活跃 run 已关闭或正在退出时，避免新旧 turn 并发争用 session 写锁。
+    // Legacy requests without a capability declaration retain the existing
+    // text fallback policy unless admission explicitly requires a new turn.
+    const strictFullTurn = requiresNewTurn ||
+      (modelCapabilities.source === "request" && Boolean(modelName));
     let steerFailReason: string | undefined;
     /** steer 回退等待期间的保活定时器（第 N+1 轮 id 的 A2A command 心跳）。 */
     let steerWaitKeepAliveTimer: ReturnType<typeof setInterval> | undefined;
-    if (isUpdate && !requiresNewTurn && route.sessionKey) {
+    if (isUpdate && route.sessionKey) {
       const previousTaskId = getCurrentTaskId(parsed.sessionId);
       const previousMessageId = getCurrentMessageId(parsed.sessionId);
-      const steerResult = tryDirectSteer({
-        sessionId: parsed.sessionId,
-        sessionKey: route.sessionKey,
-        text: textForAgent,
-        source: "user",
-      });
+      const steerResult = requiresNewTurn
+        ? { ok: false as const, reason: "new-turn-required" }
+        : tryDirectSteer({
+            sessionId: parsed.sessionId,
+            sessionKey: route.sessionKey,
+            text: textForAgent,
+            source: "user",
+          });
       if (steerResult.ok) {
         // steer 生效：第 N 轮已入站未发出的内容一律不再下发 —— 出站队列里
         // 旧 taskId 的待发帧（正文/状态卡命令/文件/引用）全部 purge；装配器
@@ -475,7 +472,8 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         }
         steerSession?.assembler?.cutSegment();
         if (previousTaskId && previousMessageId) {
-          // 只通知端侧关闭旧任务，不取消内部 run，避免影响 steer 后的回复。
+          // Preserve upstream #81: close the previous device task without
+          // canceling the embedded run receiving this text steer.
           try {
             await sendA2AResponse({
               config,
@@ -583,19 +581,70 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       });
     }
 
-    if (requiresNewTurn) {
-      const readiness = await waitForFullTurnAdmission(parsed.sessionId, route.sessionKey, params.waitForPreviousTurn, log);
-      if (readiness !== "ready") {
+    // This check is independent of channel task tracking: the SDK may retain a
+    // streaming run after our task chain has cleared, including canceled turns.
+    if (strictFullTurn) {
+      const readiness = await waitForSdkTurnIdle(route.sessionKey, log);
+      if (readiness !== "idle") {
         clearInterval(steerWaitKeepAliveTimer);
-        await sendAdmissionFailure(identity, readiness === "busy"
+        const text = readiness === "timeout"
           ? "上一条任务仍在处理中，本次请求暂未执行，请稍后重试。"
-          : "暂时无法确认会话状态，本次请求暂未执行，请稍后重试。");
+          : "暂时无法确认会话状态，本次请求暂未执行，请稍后重试。";
+        log.warn(`[BOT-DISPATCH] Full turn rejected: SDK readiness=${readiness}`);
+        await failBeforeDispatch({
+          config, sessionId: parsed.sessionId, taskId: parsed.taskId,
+          messageId: parsed.messageId, text, stepName: "请求暂未执行",
+        });
         return;
       }
     }
 
-    // steer 回退等待结束：停保活心跳（第 N+1 轮任务在下方统一注册，接管后续输出）。
+    // steer 回退等待结束：停保活心跳，正式注册第 N+1 轮任务（接管后续输出）。
     clearInterval(steerWaitKeepAliveTimer);
+    registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
+    if (!isUpdate || ((steerFailReason === "no-active-run" || strictFullTurn) &&
+        !hasWaitState(parsed.sessionId))) {
+      bindSessionKey(route.sessionKey, parsed.sessionId, parsed.taskId, parsed.messageId);
+    }
+    if (isUpdate) log.log(`[BOT-STEER] Previous turn settled, re-dispatching as a new turn`);
+
+    // 只有完成入站准入后才发送起始帧，避免附件下载、模型能力或 SDK 状态
+    // 校验失败时产生孤立的高版本起始卡 / 低版本 working 状态。
+    // 高版本起始卡仍经会话出站队列，排在上一 turn 可能在途的终态帧之后。
+    if (isLegacyAppVersion(parsed.taskId)) {
+      log.log(`[BOT] Sending initial status update (legacy)`);
+      void legacySendStatusUpdate({
+        config,
+        sessionId: parsed.sessionId,
+        taskId: parsed.taskId,
+        messageId: parsed.messageId,
+        text: "任务正在处理中，请稍候~",
+        state: "working",
+      }).catch((err) => {
+        log.error(`Failed to send initial status update (legacy):`, err);
+      });
+    } else {
+      const startSession = getOrCreateSession(parsed.sessionId);
+      const startTaskId = parsed.taskId;
+      const startMessageId = parsed.messageId;
+      startSession.outboundQueue.enqueue({
+        taskId: startTaskId,
+        label: "task-card-start",
+        send: () =>
+          sendDisplayTaskCardData({
+            config,
+            sessionId: parsed.sessionId,
+            taskId: startTaskId,
+            messageId: startMessageId,
+            index: 1,
+            stepName: "任务正在处理中",
+            isFinal: false,
+          }),
+      });
+    }
+
+    // Update selection only after new-turn admission; an incoming steer must
+    // never mutate the model selected by an older in-flight run.
     // ALS only: no registerSession. The sessionContext built below is handed
     // to runWithSessionContext() inside withReplyDispatcher.run, which is the
     // single wrap point for the whole agent turn.
@@ -642,57 +691,7 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
         }
       } catch (patchErr) {
         log.error(`[BOT] Failed to patch session model override:`, patchErr);
-        if (requiresNewTurn) {
-          await sendAdmissionFailure(identity, "暂时无法设置本次请求的模型，请稍后重试。");
-          return;
-        }
       }
-    }
-
-    registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
-    turnRegistered = true;
-    if (requiresNewTurn || !isUpdate || (steerFailReason === "no-active-run" && !hasWaitState(parsed.sessionId))) {
-      bindSessionKey(route.sessionKey, parsed.sessionId, parsed.taskId, parsed.messageId);
-    }
-    if (isUpdate && steerFailReason) log.log(`[BOT-STEER] Previous turn settled, re-dispatching as a new turn`);
-    // 只有完成入站准入后才发送起始帧，避免附件下载、模型能力或 SDK 状态
-    // 校验失败时产生孤立的高版本起始卡 / 低版本 working 状态。
-    // 低版本链路（app_ver < 11.7.10.212）：按合并前 0730 的下发逻辑 ——
-    // 直发初始 status-update，不发 DisplayTaskCardData 起始卡。
-    // 新版本链路：下发 DisplayTaskCardData 起始卡（index=1，任务正在处理中）。
-    // 走会话出站队列而非直发，排在上一 turn 可能在途的终态帧之后（steer 场景）；
-    // 配对卡的 final 帧由 reply-dispatcher / conversation-manager 在对话轮结束时下发。
-    // steer 成功路径不经过此处（已在上方 registerTask 后补发起始卡并 return）。
-    if (isLegacyAppVersion(parsed.taskId)) {
-      log.log(`[BOT] Sending initial status update (legacy)`);
-      void legacySendStatusUpdate({
-        config,
-        sessionId: parsed.sessionId,
-        taskId: parsed.taskId,
-        messageId: parsed.messageId,
-        text: "任务正在处理中，请稍候~",
-        state: "working",
-      }).catch((err) => {
-        log.error(`Failed to send initial status update (legacy):`, err);
-      });
-    } else {
-      const startSession = getOrCreateSession(parsed.sessionId);
-      const startTaskId = parsed.taskId;
-      const startMessageId = parsed.messageId;
-      startSession.outboundQueue.enqueue({
-        taskId: startTaskId,
-        label: "task-card-start",
-        send: () =>
-          sendDisplayTaskCardData({
-            config,
-            sessionId: parsed.sessionId,
-            taskId: startTaskId,
-            messageId: startMessageId,
-            index: 1,
-            stepName: "任务正在处理中",
-            isFinal: false,
-          }),
-      });
     }
 
     let dispatchCfg = cfg;
@@ -709,7 +708,9 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
       };
     }
     if (requiresNewTurn) {
-      const byChannel = { ...dispatchCfg.messages?.queue?.byChannel, "xiaoyi-channel": "followup" as const };
+      // Runtime queue resolution accepts plugin channel ids as overrides.
+      const byChannel = { ...dispatchCfg.messages?.queue?.byChannel };
+      byChannel["xiaoyi-channel"] = "followup";
       dispatchCfg = {
         ...dispatchCfg,
         messages: {
@@ -948,7 +949,7 @@ export async function handleXYMessage(params: HandleXYMessageParams): Promise<vo
     try {
       const params = message.params as any;
       const sessionId = params?.sessionId;
-      if (sessionId && turnRegistered) {
+      if (sessionId) {
         errLog.log(`[BOT] Cleaning up after error`);
 
         // 清理 taskId

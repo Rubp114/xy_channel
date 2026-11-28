@@ -20,7 +20,7 @@ export interface NewRequestPayload {
     businessID: string;
     sceneID: string;
     checkPoint: number;
-    seqNo: number;
+    interActionID: number;
     loginType?: string;
     reqTime?: string;
     message: object;

@@ -6,11 +6,16 @@ import https from 'https';
 import http from 'http';
 import crypto from 'crypto';
 import {URL} from 'url';
+import * as fs from 'fs';
+import * as path from 'path';
+import {fileURLToPath} from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 import type {OpenClawPluginApi} from 'openclaw/plugin-sdk';
 
 import {getConfig} from './config.js';
-import { logger } from '../utils/logger.js';
 import {
     ApiResponse,
     HttpHeaders,
@@ -21,31 +26,22 @@ import {
     MAX_TRACE_ID_LENGTH
 } from './constants.js';
 
-// 安全扫描接口 trace-id：sessionId 非空时按新接口约定以 '_' 拼接毫秒时间戳保证唯一性，
-// sessionId 为空时降级为 uuid，超过 MAX_TRACE_ID_LENGTH 截断
-export function buildTraceId(sessionId: string): string {
-    const traceId = sessionId ? `${sessionId}_${Date.now()}` : crypto.randomUUID();
+// 安全扫描接口 trace-id：sessionId 为空时降级为 uuid，超过 MAX_TRACE_ID_LENGTH 截断
+function buildTraceId(sessionId: string): string {
+    const traceId = sessionId ? sessionId : crypto.randomUUID();
     return traceId.length > MAX_TRACE_ID_LENGTH ? traceId.substring(0, MAX_TRACE_ID_LENGTH) : traceId;
 }
 
-function buildHeadersForCelia(config: { uid: string; apiKey: string; skillId: string; requestFrom: string }, sessionId: string, interactionId?: string): HttpHeaders {
+function buildHeadersForCelia(config: { uid: string; apiKey: string; skillId: string; requestFrom: string }, sessionId: string): HttpHeaders {
     if (!config.uid || !config.apiKey || !config.skillId || !config.requestFrom) {
         throw new Error('[SENTINEL HOOK] Missing required configuration: uid, apiKey, skillId, or requestFrom is not defined');
     }
-    // requestId = {x-session-id}_{x-interaction-id}，同时作为 x-hag-trace-id；
-    // 无 interactionId 时（如 skill 安装扫描）按原规则生成兜底 trace-id
-    const requestId = interactionId ? `${sessionId}_${interactionId}` : buildTraceId(sessionId);
-    // 每次请求打印 requestId 日志
-    logger.log(`[SENTINEL HOOK] requestId:${requestId}`);
     return {
-        'x-hag-trace-id': requestId.length > MAX_TRACE_ID_LENGTH ? requestId.substring(0, MAX_TRACE_ID_LENGTH) : requestId,
+        'x-hag-trace-id': buildTraceId(sessionId),
         'x-uid': config.uid,
         'x-api-key': config.apiKey,
         'x-request-from': config.requestFrom,
         'x-skill-id': config.skillId,
-        'X-businessid': 'XIAOYI_CLAW',
-        'x-session-id': sessionId,
-        ...(interactionId ? { 'x-interaction-id': interactionId } : {}),
         'content-type': 'application/json'
     };
 }
@@ -118,14 +114,19 @@ function handleResponse(
     });
 }
 
-// 风控 IF1 接口请求体（扁平结构，由 payload 构建函数完整组装，callApi 不再注入额外字段）
-// interactionId：本轮交互标识（taskId 第一个&和第二个&之间的值），作为 x-interaction-id 头
-export async function callApi(payload: object, api: OpenClawPluginApi, sessionId: string, interactionId?: string): Promise<ApiResponse> {
+export interface CallApiPayload {
+    sceneID: string;
+    [key: string]: unknown;
+}
+
+export async function callApi(payload: CallApiPayload, api: OpenClawPluginApi, sessionId: string): Promise<ApiResponse> {
     const config = getConfig(api);
 
-    const headersForCelia = buildHeadersForCelia(config, sessionId, interactionId);
+    const headersForCelia = buildHeadersForCelia(config, sessionId);
 
-    const httpBody = JSON.stringify(payload);
+    // 确保 uid 存在于消息体中（从 config 注入）
+    const payloadWithUid = { ...payload, uid: config.uid , action:payload.sceneID,packageName:"com.huawei.hmos.vassistant",ansDone:false,userId:config.uid};
+    const httpBody = JSON.stringify(payloadWithUid);
 
     const apiUrl = `${config.api.url}${API_URL_SUFFIX}`;
 
@@ -143,6 +144,56 @@ export async function callApi(payload: object, api: OpenClawPluginApi, sessionId
         req.on('timeout', () => {
             req.destroy();
             reject(new Error('[SENTINEL HOOK] Request timeout'));
+        });
+
+        req.write(httpBody);
+        req.end();
+    });
+}
+
+export async function callSkillScanApi(url_suffix: string, payload: object, api: OpenClawPluginApi, sessionId: string): Promise<ApiResponse> {
+    const config = getConfig(api);
+
+    const headersForCelia = buildHeadersForCelia(config, sessionId);
+
+    // 确保 uid 存在于消息体中（从 config 注入）
+    const payloadWithUid = { ...payload, uid: config.uid, packageName:"com.huawei.hmos.vassistant", ansDone:false, userId:config.uid};
+    const httpBody = JSON.stringify(payloadWithUid);
+    console.log(`TOOL_input headersForCelia: ${JSON.stringify(headersForCelia)}`)
+    console.log(`TOOL_input httpBody: ${JSON.stringify(httpBody)}`)
+
+    // 将headersForCelia和httpBody写入当前目录的txt文件
+    const logFile = path.join(__dirname, 'api_request_log.txt');
+    const logContent = [
+        `==============================`,
+        `Timestamp: ${new Date().toISOString()}`,
+        `Session ID: ${sessionId}`,
+        ``,
+        `--- headersForCelia ---`,
+        JSON.stringify(headersForCelia, null, 2),
+        ``,
+        `--- httpBody ---`,
+        JSON.stringify(httpBody, null, 2),
+        `==============================`
+    ].join('\n');
+    fs.writeFileSync(logFile, logContent, 'utf8');
+    api.logger.info(`[ai-security-plugin][skill_scope_hook] Request log written to ${logFile}`);
+
+    return new Promise((resolve, reject) => {
+        const url = config.api.url + url_suffix;
+        const options = buildRequestOptions(url, headersForCelia as HttpHeaders, config.api.timeout);
+        const protocol = url.startsWith('https://') ? https : http;
+        const req = protocol.request(options, (res) => {
+            handleResponse(res, resolve, reject);
+        });
+
+        req.on('error', (error) => {
+            reject(error);
+        });
+
+        req.on('timeout', () => {
+            req.destroy();
+            reject(new Error('[ai-security-plugin][skill_scope_hook] Request timeout'));
         });
 
         req.write(httpBody);

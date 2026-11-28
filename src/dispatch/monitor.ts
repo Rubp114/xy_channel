@@ -98,17 +98,13 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
   return new Promise<void>((resolve, reject) => {
     // Event handlers (defined early so they can be referenced in cleanup)
     const messageHandler = (message: any, webSocketSessionId: string, serverId: string) => {
-      const messageMethod = message.method;
-      const clearsContext = messageMethod === "clearContext" || messageMethod === "clear_context";
-      const cancelsTask = messageMethod === "tasks/cancel" || messageMethod === "tasks_cancel";
       // A wrapped transport session can carry multiple A2A conversations.
-      // Use the same ID as the bot for admission, while preserving the socket ID.
-      const requestedSessionId = clearsContext || cancelsTask
-        ? message.sessionId ?? message.params?.sessionId
-        : message.params?.sessionId ?? message.sessionId;
-      const sessionId = typeof requestedSessionId === "string" && requestedSessionId
-        ? requestedSessionId
-        : webSocketSessionId;
+      // Admission and capabilities belong to the conversation, not the socket.
+      const sessionId = typeof message.params?.sessionId === "string" && message.params.sessionId
+        ? message.params.sessionId
+        : typeof message.sessionId === "string" && message.sessionId
+          ? message.sessionId
+          : webSocketSessionId;
       const messageKey = `${sessionId}::${message.id}`;
 
       logger.log(`[MONITOR-HANDLER] messageHandler triggered: messageId=${message.id}`);
@@ -178,7 +174,8 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
       // completion. Direct injection is handled by bot.ts / steer-service.ts;
       // if the active run rejects the message, bot waits for these tracked tasks
       // to settle before starting a replacement dispatch.
-      if (clearsContext) {
+      const messageMethod = message.method;
+      if (messageMethod === "clearContext" || messageMethod === "clear_context") {
         void admission.enqueue(sessionId, async () => {
           await runTask();
           activeSelections.delete(sessionId);
@@ -186,7 +183,7 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
           logger.error(`XY gateway: queue processing failed: ${String(err)}`);
           activeMessages.delete(messageKey);
         });
-      } else if (cancelsTask) {
+      } else if (messageMethod === "tasks/cancel" || messageMethod === "tasks_cancel") {
         // tasks/cancel 仅发送一个简单的响应，不涉及复杂的任务状态变更，
         // 因此无需排队等待，直接并发执行以确保客户端及时收到 canceled 响应。
         logger.log(`[MONITOR] CANCEL: executing concurrently, messageKey=${messageKey}`);
@@ -205,12 +202,8 @@ export async function monitorXYProvider(opts: MonitorXYOpts = {}): Promise<void>
           const hasActiveRun = hasActiveTask(parsed.sessionId);
           const nativeImages = selection.modelCapabilities.supportsNativeImages &&
             extractFileParts(parsed.parts).some(isImageAttachment);
-          const activeSelection = activeSelections.get(sessionId);
-          // A registered turn may still be initializing its dispatcher.
-          const selectionPending = !activeSelection && activeTurnTasks.has(sessionId);
-          const changedSelection = hasActiveRun &&
-            (selectionPending || modelSelectionChanged(activeSelection, selection));
-          forceNewTurn = nativeImages || changedSelection || admission.hasBarrier(sessionId);
+          const changedSelection = hasActiveRun && modelSelectionChanged(activeSelections.get(sessionId), selection);
+          forceNewTurn = (hasActiveRun && nativeImages) || changedSelection || admission.hasBarrier(sessionId);
 
           if (steerMode && hasActiveRun && !forceNewTurn) {
             logger.log(`[MONITOR] STEER MODE: executing concurrently, sessionId=${parsed.sessionId}, messageKey=${messageKey}`);

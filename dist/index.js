@@ -4401,7 +4401,7 @@ var require_multistream = __commonJS({
 var require_pino = __commonJS({
   "node_modules/pino/pino.js"(exports, module) {
     "use strict";
-    var os15 = __require("node:os");
+    var os16 = __require("node:os");
     var stdSerializers = require_pino_std_serializers();
     var caller = require_caller();
     var redaction = require_redaction();
@@ -4449,7 +4449,7 @@ var require_pino = __commonJS({
     } = symbols;
     var { epochTime, nullTime } = time;
     var { pid } = process;
-    var hostname = os15.hostname();
+    var hostname = os16.hostname();
     var defaultErrorSerializer = stdSerializers.err;
     var defaultOptions = {
       level: "info",
@@ -4678,7 +4678,7 @@ function cleanupOldLogs() {
 }
 function enforceTotalCap() {
   try {
-    const activePath = getLogFilePath(currentDate);
+    const activePaths = /* @__PURE__ */ new Set([getLogFilePath(currentDate), getA2ALogFilePath(currentDate)]);
     const files = [];
     for (const f3 of readdirSync(LOG_DIR)) {
       if (!(f3.startsWith(LOG_PREFIX) || f3.startsWith(A2A_LOG_PREFIX)) || !f3.endsWith(".log")) continue;
@@ -4694,7 +4694,7 @@ function enforceTotalCap() {
     files.sort((a, b) => a.mtimeMs - b.mtimeMs);
     for (const f3 of files) {
       if (total <= MAX_TOTAL_BYTES) break;
-      if (f3.fp === activePath) continue;
+      if (activePaths.has(f3.fp)) continue;
       try {
         unlinkSync(f3.fp);
         total -= f3.size;
@@ -4723,8 +4723,8 @@ function checkRotation() {
   if (today !== currentDate) {
     currentDate = today;
     dest.reopen(getLogFilePath(today));
-    currentFileBytes = 0;
     a2aDest.reopen(getA2ALogFilePath(today));
+    currentFileBytes = 0;
     cleanupOldLogs();
     return;
   }
@@ -4782,7 +4782,7 @@ ${a.stack ?? ""}`;
   }).join(" ");
   return `${message} ${suffix}`;
 }
-var import_pino, LOG_DIR, LOG_PREFIX, MAX_AGE_DAYS, MAX_FILE_BYTES, MAX_TOTAL_BYTES, A2A_LOG_PREFIX, currentDate, dest, a2aDest, cleanupTimer, currentFileBytes, a2aOutLogEnabled, logger;
+var import_pino, LOG_DIR, LOG_PREFIX, MAX_AGE_DAYS, MAX_FILE_BYTES, MAX_TOTAL_BYTES, A2A_LOG_PREFIX, currentDate, dest, cleanupTimer, currentFileBytes, a2aDest, a2aOutLogEnabled, logger;
 var init_logger = __esm({
   "src/utils/logger.ts"() {
     import_pino = __toESM(require_pino(), 1);
@@ -4798,7 +4798,6 @@ var init_logger = __esm({
     }
     currentDate = getTodayDateStr();
     dest = import_pino.default.destination({ dest: getLogFilePath(currentDate), sync: false, mkdir: true });
-    a2aDest = import_pino.default.destination({ dest: getA2ALogFilePath(currentDate), sync: false, mkdir: true });
     cleanupOldLogs();
     cleanupTimer = setInterval(cleanupOldLogs, 6 * 60 * 60 * 1e3);
     cleanupTimer.unref?.();
@@ -4807,6 +4806,7 @@ var init_logger = __esm({
       currentFileBytes = statSync(getLogFilePath(currentDate)).size;
     } catch {
     }
+    a2aDest = import_pino.default.destination({ dest: getA2ALogFilePath(currentDate), sync: false, mkdir: true });
     process.on("uncaughtException", (err) => {
       writeLog("fatal", "Uncaught exception", [err]);
     });
@@ -8957,13 +8957,11 @@ var init_wrapper = __esm({
 });
 
 // src/transport/heartbeat.ts
-var CLOCK_JUMP_CHECK_INTERVAL_MS, CLOCK_JUMP_THRESHOLD_MS, HeartbeatManager;
+var HeartbeatManager;
 var init_heartbeat = __esm({
   "src/transport/heartbeat.ts"() {
     init_wrapper();
     init_logger();
-    CLOCK_JUMP_CHECK_INTERVAL_MS = 1e3;
-    CLOCK_JUMP_THRESHOLD_MS = 5e3;
     HeartbeatManager = class {
       constructor(ws, config, onTimeout, serverName = "unknown", logFn, errorFn, onHeartbeatSuccess) {
         this.ws = ws;
@@ -8982,10 +8980,6 @@ var init_heartbeat = __esm({
       intervalTimer = null;
       timeoutTimer = null;
       lastPongTime = 0;
-      // 时钟跳变探测器状态
-      clockJumpTimer = null;
-      lastWallMs = 0;
-      lastMonoNs = 0n;
       // Logging functions following feishu pattern
       log;
       error;
@@ -9004,17 +8998,8 @@ var init_heartbeat = __esm({
           this.onHeartbeatSuccess?.();
         });
         this.intervalTimer = setInterval(() => {
-          const gap = Date.now() - this.lastPongTime;
-          if (this.lastPongTime > 0 && gap > this.config.interval + this.config.timeout) {
-            this.error(
-              `Stale connection detected for ${this.serverName}: no pong for ${gap}ms (exceeds ${this.config.interval + this.config.timeout}ms), forcing reconnect`
-            );
-            this.onTimeout();
-            return;
-          }
           this.sendHeartbeat();
         }, this.config.interval);
-        this.startClockJumpDetector();
         this.log(`[DEBUG] Heartbeat started for ${this.serverName}: interval=${this.config.interval}ms`);
       }
       /**
@@ -9029,56 +9014,7 @@ var init_heartbeat = __esm({
           clearTimeout(this.timeoutTimer);
           this.timeoutTimer = null;
         }
-        this.stopClockJumpDetector();
         this.log(`[DEBUG] Heartbeat stopped for ${this.serverName}`);
-      }
-      /**
-       * 时钟跳变探测器（快照冻结/恢复场景）。
-       *
-       * Node/libuv 定时器基于单调时钟（CLOCK_MONOTONIC），VM 快照冻结期间
-       * 单调时钟停走，恢复后挂起的 interval 还需等完剩余延迟才触发——
-       * 30s 心跳 interval 意味着死链发现延迟 0-30s（本 tick 自身也是单调
-       * 定时器，恢复后最迟 ~1s 内触发，把发现延迟从 0-30s 压到 ~1s）。
-       *
-       * 每个 tick 对比墙钟（Date.now）与单调时钟（hrtime）的增量：
-       * 墙钟相对单调时钟前跳超过阈值，即判定进程刚从快照冻结中恢复：
-       * - 距上次 pong 已超一个心跳周期 → 直接判死链，立即 onTimeout 重连；
-       * - 否则连接可能仍存活，立即发一次心跳探测（timeout 兜底）。
-       */
-      startClockJumpDetector() {
-        this.stopClockJumpDetector();
-        this.lastWallMs = Date.now();
-        this.lastMonoNs = process.hrtime.bigint();
-        this.clockJumpTimer = setInterval(() => {
-          const nowWallMs = Date.now();
-          const nowMonoNs = process.hrtime.bigint();
-          const wallDeltaMs = nowWallMs - this.lastWallMs;
-          const monoDeltaMs = Number(nowMonoNs - this.lastMonoNs) / 1e6;
-          this.lastWallMs = nowWallMs;
-          this.lastMonoNs = nowMonoNs;
-          const jumpMs = wallDeltaMs - monoDeltaMs;
-          if (jumpMs <= CLOCK_JUMP_THRESHOLD_MS) return;
-          this.log(
-            `[CLOCK-JUMP] Wall clock jumped forward ${Math.round(jumpMs)}ms (wall +${Math.round(wallDeltaMs)}ms, mono +${Math.round(monoDeltaMs)}ms) \u2014 snapshot freeze/resume detected`
-          );
-          const gapMs = nowWallMs - this.lastPongTime;
-          if (this.lastPongTime > 0 && gapMs > this.config.interval + this.config.timeout) {
-            this.error(
-              `Stale connection detected for ${this.serverName} after clock jump: no pong for ${gapMs}ms (exceeds ${this.config.interval + this.config.timeout}ms), forcing reconnect`
-            );
-            this.onTimeout();
-          } else {
-            this.log(`[CLOCK-JUMP] Gap since last pong is ${gapMs}ms (within tolerance), sending immediate heartbeat probe`);
-            this.sendHeartbeat();
-          }
-        }, CLOCK_JUMP_CHECK_INTERVAL_MS);
-        this.clockJumpTimer.unref?.();
-      }
-      stopClockJumpDetector() {
-        if (this.clockJumpTimer) {
-          clearInterval(this.clockJumpTimer);
-          this.clockJumpTimer = null;
-        }
       }
       /**
        * Send a heartbeat ping.
@@ -9089,30 +9025,14 @@ var init_heartbeat = __esm({
           return;
         }
         try {
-          const message = typeof this.config.message === "function" ? this.config.message() : this.config.message;
-          this.ws.send(message);
+          this.ws.send(this.config.message);
           this.ws.ping();
-          if (this.timeoutTimer) {
-            clearTimeout(this.timeoutTimer);
-            this.timeoutTimer = null;
-          }
           this.timeoutTimer = setTimeout(() => {
             this.error(`Heartbeat timeout for ${this.serverName}`);
             this.onTimeout();
           }, this.config.timeout);
         } catch (error) {
           this.error(`Failed to send heartbeat for ${this.serverName}:`, error);
-        }
-      }
-      /**
-       * External notification of connection activity (e.g. app-level heartbeat response received).
-       * Updates liveness state and cancels the pending timeout timer.
-       */
-      notifyActivity() {
-        this.lastPongTime = Date.now();
-        if (this.timeoutTimer) {
-          clearTimeout(this.timeoutTimer);
-          this.timeoutTimer = null;
         }
       }
       /**
@@ -9304,7 +9224,7 @@ var init_websocket = __esm({
       getConnectionDiagnostics() {
         const cacheKey = `${this.config.apiKey}-${this.config.agentId}`;
         const connectionDiag = this.getConnectionDiagnostic();
-        const totalEventListeners = this.listenerCount("message") + this.listenerCount("connected") + this.listenerCount("disconnected") + this.listenerCount("error") + this.listenerCount("ready") + this.listenerCount("data-event") + this.listenerCount("ask-user-response") + this.listenerCount("gui-agent-response") + this.listenerCount("agent-as-skill-response");
+        const totalEventListeners = this.listenerCount("message") + this.listenerCount("connected") + this.listenerCount("disconnected") + this.listenerCount("error") + this.listenerCount("ready") + this.listenerCount("data-event") + this.listenerCount("gui-agent-response") + this.listenerCount("agent-as-skill-response");
         return {
           cacheKey,
           connection: connectionDiag,
@@ -9418,21 +9338,12 @@ var init_websocket = __esm({
             resolve2();
           });
           ws.on("message", (data) => {
-            if (this.ws !== ws) return;
             this.handleMessage(data);
           });
           ws.on("close", (code, reason) => {
-            if (this.ws !== ws) {
-              this.log("Ignoring close event from stale connection");
-              return;
-            }
             this.handleClose(code, reason.toString());
           });
           ws.on("error", (error) => {
-            if (this.ws !== ws) {
-              this.log(`Ignoring error from stale connection: ${error.message}`);
-              return;
-            }
             this.handleError(error);
             if (!this.state.connected) {
               clearTimeout(connectTimeout);
@@ -9478,35 +9389,13 @@ var init_websocket = __esm({
           }, 1e4);
         }
         this.startHeartbeat();
-        try {
-          if (this.ws && this.ws.readyState === wrapper_default.OPEN) {
-            this.ws.ping();
-            this.log("[WS-SEND] Immediate ping after init (liveness probe + early buffer flush)");
-          }
-        } catch (err) {
-          this.error("Failed to send immediate ping after init:", err);
-        }
-        try {
-          if (this.ws && this.ws.readyState === wrapper_default.OPEN) {
-            this.ws.send(
-              JSON.stringify({
-                msgType: "heartbeat",
-                agentId: this.config.agentId,
-                msgDetail: JSON.stringify({ timestamp: Date.now() })
-              })
-            );
-            this.log("[WS-SEND] Immediate app-level heartbeat after init (nudge server to flush pending)");
-          }
-        } catch (err) {
-          this.error("Failed to send immediate app-level heartbeat after init:", err);
-        }
       }
       /**
        * Start heartbeat.
        */
       startHeartbeat() {
         if (!this.ws) return;
-        this.heartbeat?.stop();
+        const hostname = os.hostname();
         const heartbeat = new HeartbeatManager(
           this.ws,
           {
@@ -9514,18 +9403,17 @@ var init_websocket = __esm({
             // 30 seconds
             timeout: 1e4,
             // 10 seconds
-            // 工厂函数：每次发送时现拼，时间戳取当前值（修复旧时间戳被服务端丢弃的问题）
-            message: () => JSON.stringify({
+            message: JSON.stringify({
               msgType: "heartbeat",
               agentId: this.config.agentId,
-              msgDetail: JSON.stringify({ timestamp: Date.now() })
+              msgDetail: JSON.stringify({ timestamp: Date.now(), hostname })
             })
           },
           () => {
             this.error("Heartbeat timeout, reconnecting...");
             if (this.ws && (this.ws.readyState === wrapper_default.OPEN || this.ws.readyState === wrapper_default.CONNECTING)) {
-              this.log("Terminating connection due to heartbeat timeout");
-              this.ws.terminate();
+              this.log("Closing connection due to heartbeat timeout");
+              this.ws.close();
             } else {
               this.reconnectServer();
             }
@@ -9533,20 +9421,10 @@ var init_websocket = __esm({
           "websocket",
           this.log,
           this.error,
-          () => this.handleHeartbeatActivity()
+          this.onHealthEvent
         );
         heartbeat.start();
         this.heartbeat = heartbeat;
-      }
-      toAskUserResponse(item) {
-        if (item?.header?.namespace !== "AgentEvent" || item?.header?.name !== "InvokeRsp") {
-          return null;
-        }
-        const payload = item?.payload;
-        if (!payload || typeof payload.ask_user_id !== "string" || !payload.ask_user_id) {
-          return null;
-        }
-        return payload;
       }
       toUploadExeDataEvent(item) {
         const outputs = item?.payload?.outputs ?? {};
@@ -9696,11 +9574,8 @@ ${part.text}`
           if (Array.isArray(parsed.events)) {
             const eventSessionId = parsed.session?.sessionId || parsed.sessionId;
             for (const item of parsed.events) {
-              const askUserResponse = this.toAskUserResponse(item);
               const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, eventSessionId ?? "");
-              if (askUserResponse) {
-                this.emit("ask-user-response", askUserResponse);
-              } else if (crossDeviceTaskResult) {
+              if (crossDeviceTaskResult) {
                 this.emit("cross-device-task-result", crossDeviceTaskResult);
               }
             }
@@ -9742,14 +9617,10 @@ ${part.text}`
                 for (const item of events) {
                   log.log(`[XY] Raw event: header=${JSON.stringify(item?.header)}, payloadKeys=${Object.keys(item?.payload ?? {}).join(",")}`);
                   const dataEvent = this.toUploadExeDataEvent(item);
-                  const askUserResponse = this.toAskUserResponse(item);
                   const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, sessionId);
                   if (dataEvent) {
                     log.log(`[XY] Emitting data-event, intentName: ${dataEvent.intentName}, status: ${dataEvent.status}, size: ${JSON.stringify(dataEvent).length} bytes`);
                     this.emit("data-event", dataEvent);
-                  } else if (askUserResponse) {
-                    log.log(`[XY] AgentEvent.InvokeRsp detected, emitting ask-user-response, askUserId=${askUserResponse.ask_user_id}`);
-                    this.emit("ask-user-response", askUserResponse);
                   } else if (crossDeviceTaskResult) {
                     this.emit("cross-device-task-result", crossDeviceTaskResult);
                   } else if (item.header?.namespace === "ClawAgent" && item.header?.name === "InvokeJarvisGUIAgentResponse") {
@@ -9837,8 +9708,7 @@ ${part.text}`
           log.log(`[XY] Message type: Wrapped, msgType: ${inboundMsg.msgType}`);
           if (inboundMsg.msgType === "heartbeat") {
             log.log("[XY] Received heartbeat response");
-            this.heartbeat?.notifyActivity();
-            this.handleHeartbeatActivity();
+            this.onHealthEvent?.();
             return;
           }
           if (inboundMsg.msgType === "data") {
@@ -9857,11 +9727,8 @@ ${part.text}`
               if (Array.isArray(parsedDetail.events)) {
                 const eventSessionId = parsedDetail.session?.sessionId || inboundMsg.sessionId || parsedDetail.sessionId;
                 for (const item of parsedDetail.events) {
-                  const askUserResponse = this.toAskUserResponse(item);
                   const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(item, eventSessionId ?? "");
-                  if (askUserResponse) {
-                    this.emit("ask-user-response", askUserResponse);
-                  } else if (crossDeviceTaskResult) {
+                  if (crossDeviceTaskResult) {
                     this.emit("cross-device-task-result", crossDeviceTaskResult);
                   }
                 }
@@ -9880,7 +9747,6 @@ ${part.text}`
                   for (const item of events) {
                     log.log(`[XY] Raw event (wrapped): header=${JSON.stringify(item?.header)}, payloadKeys=${Object.keys(item?.payload ?? {}).join(",")}`);
                     const dataEvent = this.toUploadExeDataEvent(item);
-                    const askUserResponse = this.toAskUserResponse(item);
                     const crossDeviceTaskResult = this.toCrossDeviceTaskResultEvent(
                       item,
                       inboundMsg.sessionId || a2aRequest2.params?.sessionId
@@ -9888,9 +9754,6 @@ ${part.text}`
                     if (dataEvent) {
                       log.log(`[XY] Emitting data-event, intentName: ${dataEvent.intentName}, status: ${dataEvent.status}, size: ${JSON.stringify(dataEvent).length} bytes`);
                       this.emit("data-event", dataEvent);
-                    } else if (askUserResponse) {
-                      log.log(`[XY] AgentEvent.InvokeRsp detected (wrapped), emitting ask-user-response, askUserId=${askUserResponse.ask_user_id}`);
-                      this.emit("ask-user-response", askUserResponse);
                     } else if (crossDeviceTaskResult) {
                       this.emit("cross-device-task-result", crossDeviceTaskResult);
                     } else if (item.header?.namespace === "ClawAgent" && item.header?.name === "InvokeJarvisGUIAgentResponse") {
@@ -9992,24 +9855,6 @@ ${part.text}`
         }
       }
       /**
-       * Handle connection activity (protocol pong or app-level heartbeat response).
-       * Reports health and flushes the reconnect buffer early instead of waiting the full 10s.
-       */
-      handleHeartbeatActivity() {
-        this.onHealthEvent?.();
-        if (this.isBuffering && this.reconnectBufferTimer) {
-          clearTimeout(this.reconnectBufferTimer);
-          this.reconnectBufferTimer = null;
-          this.messageQueue.flush((msg) => {
-            if (this.ws && this.ws.readyState === wrapper_default.OPEN) {
-              this.ws.send(JSON.stringify(msg));
-            }
-          });
-          this.isBuffering = false;
-          this.log("[MessageQueue] Activity detected during buffer period, flushed queue early");
-        }
-      }
-      /**
        * Handle connection error.
        */
       handleError(error) {
@@ -10017,9 +9862,15 @@ ${part.text}`
         this.emit("error", error);
       }
       /**
-       * Reconnect with fast-retry-then-backoff schedule.
-       * 前几次快速重试（0.5/1/1/2/4s + 随机抖动），之后指数退避封顶 30s。
-       * 修复：旧版首次就 1s 起步指数增长，503 场景累计 31s+10s 缓冲 = 42s 才恢复。
+       * Reconnect with exponential backoff + full jitter.
+       *
+       * A server outage makes every client detect the drop at the same moment and
+       * start from the same attempt counter, so a deterministic delay sequence
+       * (1s, 2s, 4s, ...) makes all clients reconnect in lock-step waves. Full
+       * jitter draws each delay uniformly from [0, window] so the herd spreads
+       * out and stays decorrelated even after many rounds at the cap:
+       * - attempt 1: window = reconnectFirstMaxMs (dilutes the first burst)
+       * - attempt ≥2: window = min(base * 2^(n-1), reconnectMaxMs)
        */
       reconnectServer() {
         if (this.isShuttingDown) return;
@@ -10028,11 +9879,13 @@ ${part.text}`
           this.log("Cleared existing reconnect timer to prevent concurrent reconnection");
         }
         this.state.reconnectAttempts++;
-        const FAST_RETRY_SCHEDULE = [500, 1e3, 1e3, 2e3, 4e3];
         const attempt = this.state.reconnectAttempts;
-        const base = attempt <= FAST_RETRY_SCHEDULE.length ? FAST_RETRY_SCHEDULE[attempt - 1] : Math.min(1e3 * Math.pow(2, attempt - 1), 3e4);
-        const delay = base + Math.floor(Math.random() * 250);
-        this.log(`Reconnecting in ${delay}ms (attempt ${attempt})...`);
+        const baseMs = this.config.reconnectBaseMs ?? 1e3;
+        const maxMs = this.config.reconnectMaxMs ?? 3e4;
+        const firstMaxMs = this.config.reconnectFirstMaxMs ?? 3e3;
+        const windowMs = attempt === 1 ? firstMaxMs : Math.min(baseMs * Math.pow(2, attempt - 1), maxMs);
+        const delay = Math.round(Math.random() * windowMs);
+        this.log(`Reconnecting in ${delay}ms (attempt ${attempt}, window ${windowMs}ms)...`);
         const timer = setTimeout(() => {
           this.reconnectTimer = null;
           this.connectServer(this.config.wsUrl).catch((error) => {
@@ -17082,15 +16935,16 @@ async function sendWsFrame(params) {
         `[A2A-OUT] msgType=${outboundMessage.msgType}, agentId=${outboundMessage.agentId}, sessionId=${sessionId}, taskId=${taskId}, size=${outboundMessage.msgDetail.length}`
       );
       const commands = extractCommands(frame);
-      const memoryFileReadCommands = commands.filter(isMemoryFileReadCommand);
-      if (memoryFileReadCommands.length > 0) {
-        for (const command of memoryFileReadCommands) {
-          const ans = command.payload?.ans;
-          const contentBytes = Number.isSafeInteger(ans?.contentBytes) ? ans.contentBytes : "none";
-          const errorCode = typeof ans?.errorCode === "string" ? ans.errorCode : "none";
-          log.log(
-            `[A2A-OUT] command action=MemoryFileRead, ok=${ans?.ok === true}, contentBytes=${contentBytes}, errorCode=${errorCode}`
-          );
+      if (commands.some(isMemoryFileReadCommand)) {
+        log.log(`[A2A-OUT] msgDetail omitted for MemoryFileRead response`);
+        for (const command of commands) {
+          if (isMemoryFileReadCommand(command)) {
+            const answer = command.payload?.ans;
+            const contentBytes = typeof answer?.contentBytes === "number" && Number.isFinite(answer.contentBytes) ? answer.contentBytes : typeof answer?.content === "string" ? Buffer.byteLength(answer.content, "utf8") : 0;
+            log.log(`[A2A-OUT] action=MemoryFileRead, ok=${answer?.ok === true}, contentBytes=${contentBytes}`);
+          } else {
+            log.log(`[A2A-OUT] command=${JSON.stringify(command)}`);
+          }
         }
       } else {
         log.log(`[A2A-OUT] msgDetail=${buildLoggableMsgDetail(frame)}`);
@@ -22053,6 +21907,53 @@ var init_steer_service = __esm({
 import { resolveRuntimeConversationBindingRoute } from "openclaw/plugin-sdk/conversation-runtime";
 import { updateSessionStoreEntry, updateSessionStore, resolveStorePath } from "openclaw/plugin-sdk/session-store-runtime";
 import { callGatewayTool, resolveActiveEmbeddedRunSessionId as resolveActiveEmbeddedRunSessionId2 } from "openclaw/plugin-sdk/agent-harness-runtime";
+async function waitForSdkTurnIdle(sessionKey, log) {
+  if (!sessionKey) return "unavailable";
+  const deadline = Date.now() + SDK_TURN_IDLE_TIMEOUT_MS;
+  for (; ; ) {
+    try {
+      if (!resolveActiveEmbeddedRunSessionId2(sessionKey)) return "idle";
+    } catch (err) {
+      log.error(`[BOT-DISPATCH] Cannot verify SDK turn readiness:`, err);
+      return "unavailable";
+    }
+    if (Date.now() >= deadline) return "timeout";
+    await new Promise((resolve2) => setTimeout(resolve2, CHANNEL_READY_POLL_MS));
+  }
+}
+async function failBeforeDispatch(params) {
+  const { config, sessionId, taskId, messageId, text } = params;
+  const outboundQueue = getOrCreateSession(sessionId).outboundQueue;
+  outboundQueue.enqueue({
+    taskId,
+    label: "inbound-failure-status",
+    send: () => sendStatusUpdate({
+      config,
+      sessionId,
+      taskId,
+      messageId,
+      text,
+      state: "failed"
+    })
+  });
+  outboundQueue.enqueue({
+    taskId,
+    label: "inbound-failure-final",
+    send: () => sendA2AResponse({
+      config,
+      sessionId,
+      taskId,
+      messageId,
+      text,
+      append: false,
+      final: true,
+      errorCode: 99921111,
+      errorMessage: text
+    })
+  });
+  await outboundQueue.whenIdle();
+  completeTask(sessionId, taskId);
+}
 async function waitForPreviousTurnWithTimeoutWarning(waitForPreviousTurn, onTimeout) {
   if (!waitForPreviousTurn) {
     return;
@@ -22074,72 +21975,10 @@ async function waitForPreviousTurnWithTimeoutWarning(waitForPreviousTurn, onTime
     }
   }
 }
-async function waitForFullTurnAdmission(sessionId, sessionKey, waitForPreviousTurn, log) {
-  if (!sessionKey) return "unavailable";
-  let previousSettled = !waitForPreviousTurn;
-  let previousWaitFailed = false;
-  void waitForPreviousTurn?.().then(
-    () => {
-      previousSettled = true;
-    },
-    () => {
-      previousWaitFailed = true;
-    }
-  );
-  const deadline = Date.now() + FULL_TURN_ADMISSION_TIMEOUT_MS;
-  for (; ; ) {
-    if (previousWaitFailed) return "unavailable";
-    try {
-      if (previousSettled && !hasActiveTask(sessionId) && !hasWaitState(sessionId) && !resolveActiveEmbeddedRunSessionId2(sessionKey)) {
-        return "ready";
-      }
-    } catch (err) {
-      log.error("[MODEL-INPUT] SDK run lookup failed:", err);
-      return "unavailable";
-    }
-    if (Date.now() >= deadline) return "busy";
-    await new Promise((resolve2) => setTimeout(resolve2, 100));
-  }
-}
-async function sendAdmissionFailure(identity, text) {
-  const queue = getOrCreateSession(identity.sessionId).outboundQueue;
-  const legacy = isLegacyAppVersion(identity.taskId);
-  queue.enqueue({
-    taskId: identity.taskId,
-    label: "admission-failure-status",
-    send: () => (legacy ? sendStatusUpdate2 : sendStatusUpdate)({ ...identity, text, state: "failed" })
-  });
-  if (!legacy) {
-    queue.enqueue({
-      taskId: identity.taskId,
-      label: "admission-failure-card",
-      send: () => sendDisplayTaskCardData({
-        ...identity,
-        index: 1,
-        stepName: text,
-        isFinal: true
-      })
-    });
-  }
-  queue.enqueue({
-    taskId: identity.taskId,
-    label: "admission-failure-final",
-    send: () => (legacy ? sendA2AResponse2 : sendA2AResponse)({
-      ...identity,
-      text,
-      append: false,
-      final: true,
-      errorCode: 99921111,
-      errorMessage: text
-    })
-  });
-  await queue.whenIdle();
-}
 async function handleXYMessage(params) {
   const { cfg, runtime, message, accountId, webSocketSessionId } = params;
   const distributionSessionId = typeof message?.sessionId === "string" && message.sessionId.length > 0 ? message.sessionId : void 0;
   const core = getXYRuntime();
-  let turnRegistered = false;
   try {
     const messageMethod = message.method;
     if (messageMethod === "clearContext" || messageMethod === "clear_context") {
@@ -22243,11 +22082,12 @@ async function handleXYMessage(params) {
     if (sdkApiVersion) {
       log.log(`[BOT] Extracted sdk_api_version: ${sdkApiVersion}`);
     }
-    const modelName = extractModelName(parsed.parts)?.replace(/^xiaoyiprovider\//i, "");
-    const modelCapabilities = extractModelInput(parsed.parts);
+    const modelName = extractModelName(parsed.parts);
     if (modelName) {
       log.log(`[BOT] Extracted modelName: ${modelName}`);
     }
+    const modelCapabilities = extractModelInput(parsed.parts);
+    log.log(`[MODEL-INPUT] source=${modelCapabilities.source}, input=${modelCapabilities.input.join(",")}`);
     const runCrossTaskContext = extractRunCrossTaskContext(parsed.parts);
     const config = resolveXYConfig(cfg);
     cacheXYConfig(config);
@@ -22275,11 +22115,6 @@ async function handleXYMessage(params) {
         runtimeRoute.boundSessionKey ? `[BOT] routed via bound conversation ${parsed.sessionId} -> ${runtimeRoute.boundSessionKey}` : `[BOT] plugin-bound conversation ${parsed.sessionId}`
       );
     }
-    const fileParts = extractFileParts(parsed.parts);
-    const imageParts = fileParts.filter(isImageAttachment);
-    const hasNativeImages = modelCapabilities.supportsNativeImages && imageParts.length > 0;
-    const requiresNewTurn = Boolean(params.forceNewTurn || hasNativeImages);
-    const identity = { config, sessionId: parsed.sessionId, taskId: parsed.taskId, messageId: parsed.messageId };
     const text = extractTextFromParts(parsed.parts);
     let textForAgent = text || "";
     if (route.sessionKey && textForAgent) {
@@ -22306,42 +22141,53 @@ async function handleXYMessage(params) {
         );
       }
     }
-    let mediaPayload;
+    let mediaPayload = {};
+    const fileParts = extractFileParts(parsed.parts);
+    const downloadedFiles = await downloadFilesFromParts(
+      fileParts,
+      void 0,
+      modelCapabilities.supportsNativeImages ? { maxImageBytes: NATIVE_IMAGE_MAX_BYTES } : void 0
+    );
+    log.log(`[BOT] Downloaded ${downloadedFiles.length} file(s)`);
+    mediaPayload = buildXYMediaPayload(downloadedFiles);
+    const imageParts = fileParts.filter(isImageAttachment);
     let nativeImages = [];
-    try {
-      const downloadedFiles = await downloadFilesFromParts(
-        fileParts,
-        void 0,
-        hasNativeImages ? { maxImageBytes: NATIVE_IMAGE_MAX_BYTES } : void 0
-      );
-      log.log(`[BOT] Downloaded ${downloadedFiles.length} file(s)`);
-      mediaPayload = buildXYMediaPayload(downloadedFiles);
-      if (hasNativeImages) {
+    if (modelCapabilities.supportsNativeImages && imageParts.length > 0) {
+      try {
         const downloadedImages = downloadedFiles.filter(isImageAttachment);
         if (downloadedImages.length !== imageParts.length) {
           throw new NativeImageInputError("\u90E8\u5206\u56FE\u7247\u4E0B\u8F7D\u5931\u8D25\u6216\u8D85\u8FC7\u5927\u5C0F\u9650\u5236\uFF0C\u8BF7\u91CD\u65B0\u4E0A\u4F20\u540E\u91CD\u8BD5\u3002");
         }
         nativeImages = await loadNativeImages(downloadedImages, cfg);
+        log.log(`[MODEL-INPUT] native images expected=${imageParts.length}, loaded=${nativeImages.length}`);
+      } catch (err) {
+        const text2 = err instanceof NativeImageInputError ? err.message : "\u56FE\u7247\u5904\u7406\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u56FE\u7247\u683C\u5F0F\u548C\u5927\u5C0F\u540E\u91CD\u8BD5\u3002";
+        log.error(`[MODEL-INPUT] Native image preparation failed:`, err);
+        await failBeforeDispatch({
+          config,
+          sessionId: parsed.sessionId,
+          taskId: parsed.taskId,
+          messageId: parsed.messageId,
+          text: text2,
+          stepName: "\u56FE\u7247\u5904\u7406\u5931\u8D25"
+        });
+        return;
       }
-    } catch (err) {
-      if (!requiresNewTurn) throw err;
-      const text2 = err instanceof NativeImageInputError ? err.message : "\u9644\u4EF6\u5904\u7406\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u4E0A\u4F20\u540E\u91CD\u8BD5\u3002";
-      log.error("[MODEL-INPUT] Could not prepare attachments:", err);
-      await sendAdmissionFailure(identity, text2);
-      return;
     }
+    const requiresNewTurn = params.forceNewTurn || nativeImages.length > 0;
     if (isUpdate && !requiresNewTurn && mediaPayload.MediaPaths?.length) {
       const fileHint = `
 \u3010\u7528\u6237\u4E0A\u4F20\u9644\u4EF6\u3011\uFF1A${JSON.stringify(mediaPayload.MediaPaths)}`;
       textForAgent = `${textForAgent}${fileHint}`;
       log.log(`[BOT] Steer: appended file paths to text`);
     }
+    const strictFullTurn = requiresNewTurn || modelCapabilities.source === "request" && Boolean(modelName);
     let steerFailReason;
     let steerWaitKeepAliveTimer;
-    if (isUpdate && !requiresNewTurn && route.sessionKey) {
+    if (isUpdate && route.sessionKey) {
       const previousTaskId = getCurrentTaskId(parsed.sessionId);
       const previousMessageId = getCurrentMessageId(parsed.sessionId);
-      const steerResult = tryDirectSteer({
+      const steerResult = requiresNewTurn ? { ok: false, reason: "new-turn-required" } : tryDirectSteer({
         sessionId: parsed.sessionId,
         sessionKey: route.sessionKey,
         text: textForAgent,
@@ -22439,15 +22285,59 @@ async function handleXYMessage(params) {
         log.error(`[BOT-STEER] Previous turn did not settle within ${PREVIOUS_TURN_SETTLE_TIMEOUT_MS}ms; proceeding with fallback dispatch`);
       });
     }
-    if (requiresNewTurn) {
-      const readiness = await waitForFullTurnAdmission(parsed.sessionId, route.sessionKey, params.waitForPreviousTurn, log);
-      if (readiness !== "ready") {
+    if (strictFullTurn) {
+      const readiness = await waitForSdkTurnIdle(route.sessionKey, log);
+      if (readiness !== "idle") {
         clearInterval(steerWaitKeepAliveTimer);
-        await sendAdmissionFailure(identity, readiness === "busy" ? "\u4E0A\u4E00\u6761\u4EFB\u52A1\u4ECD\u5728\u5904\u7406\u4E2D\uFF0C\u672C\u6B21\u8BF7\u6C42\u6682\u672A\u6267\u884C\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002" : "\u6682\u65F6\u65E0\u6CD5\u786E\u8BA4\u4F1A\u8BDD\u72B6\u6001\uFF0C\u672C\u6B21\u8BF7\u6C42\u6682\u672A\u6267\u884C\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
+        const text2 = readiness === "timeout" ? "\u4E0A\u4E00\u6761\u4EFB\u52A1\u4ECD\u5728\u5904\u7406\u4E2D\uFF0C\u672C\u6B21\u8BF7\u6C42\u6682\u672A\u6267\u884C\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002" : "\u6682\u65F6\u65E0\u6CD5\u786E\u8BA4\u4F1A\u8BDD\u72B6\u6001\uFF0C\u672C\u6B21\u8BF7\u6C42\u6682\u672A\u6267\u884C\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002";
+        log.warn(`[BOT-DISPATCH] Full turn rejected: SDK readiness=${readiness}`);
+        await failBeforeDispatch({
+          config,
+          sessionId: parsed.sessionId,
+          taskId: parsed.taskId,
+          messageId: parsed.messageId,
+          text: text2,
+          stepName: "\u8BF7\u6C42\u6682\u672A\u6267\u884C"
+        });
         return;
       }
     }
     clearInterval(steerWaitKeepAliveTimer);
+    registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
+    if (!isUpdate || (steerFailReason === "no-active-run" || strictFullTurn) && !hasWaitState(parsed.sessionId)) {
+      bindSessionKey(route.sessionKey, parsed.sessionId, parsed.taskId, parsed.messageId);
+    }
+    if (isUpdate) log.log(`[BOT-STEER] Previous turn settled, re-dispatching as a new turn`);
+    if (isLegacyAppVersion(parsed.taskId)) {
+      log.log(`[BOT] Sending initial status update (legacy)`);
+      void sendStatusUpdate2({
+        config,
+        sessionId: parsed.sessionId,
+        taskId: parsed.taskId,
+        messageId: parsed.messageId,
+        text: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019~",
+        state: "working"
+      }).catch((err) => {
+        log.error(`Failed to send initial status update (legacy):`, err);
+      });
+    } else {
+      const startSession = getOrCreateSession(parsed.sessionId);
+      const startTaskId = parsed.taskId;
+      const startMessageId = parsed.messageId;
+      startSession.outboundQueue.enqueue({
+        taskId: startTaskId,
+        label: "task-card-start",
+        send: () => sendDisplayTaskCardData({
+          config,
+          sessionId: parsed.sessionId,
+          taskId: startTaskId,
+          messageId: startMessageId,
+          index: 1,
+          stepName: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D",
+          isFinal: false
+        })
+      });
+    }
     if (modelName && modelName.trim() !== "" && modelName.toLowerCase() !== "none") {
       try {
         const storePath = resolveStorePath();
@@ -22485,47 +22375,7 @@ async function handleXYMessage(params) {
         }
       } catch (patchErr) {
         log.error(`[BOT] Failed to patch session model override:`, patchErr);
-        if (requiresNewTurn) {
-          await sendAdmissionFailure(identity, "\u6682\u65F6\u65E0\u6CD5\u8BBE\u7F6E\u672C\u6B21\u8BF7\u6C42\u7684\u6A21\u578B\uFF0C\u8BF7\u7A0D\u540E\u91CD\u8BD5\u3002");
-          return;
-        }
       }
-    }
-    registerTask(parsed.sessionId, parsed.taskId, parsed.messageId);
-    turnRegistered = true;
-    if (requiresNewTurn || !isUpdate || steerFailReason === "no-active-run" && !hasWaitState(parsed.sessionId)) {
-      bindSessionKey(route.sessionKey, parsed.sessionId, parsed.taskId, parsed.messageId);
-    }
-    if (isUpdate && steerFailReason) log.log(`[BOT-STEER] Previous turn settled, re-dispatching as a new turn`);
-    if (isLegacyAppVersion(parsed.taskId)) {
-      log.log(`[BOT] Sending initial status update (legacy)`);
-      void sendStatusUpdate2({
-        config,
-        sessionId: parsed.sessionId,
-        taskId: parsed.taskId,
-        messageId: parsed.messageId,
-        text: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D\uFF0C\u8BF7\u7A0D\u5019~",
-        state: "working"
-      }).catch((err) => {
-        log.error(`Failed to send initial status update (legacy):`, err);
-      });
-    } else {
-      const startSession = getOrCreateSession(parsed.sessionId);
-      const startTaskId = parsed.taskId;
-      const startMessageId = parsed.messageId;
-      startSession.outboundQueue.enqueue({
-        taskId: startTaskId,
-        label: "task-card-start",
-        send: () => sendDisplayTaskCardData({
-          config,
-          sessionId: parsed.sessionId,
-          taskId: startTaskId,
-          messageId: startMessageId,
-          index: 1,
-          stepName: "\u4EFB\u52A1\u6B63\u5728\u5904\u7406\u4E2D",
-          isFinal: false
-        })
-      });
     }
     let dispatchCfg = cfg;
     if (modelCapabilities.supportsNativeImages) {
@@ -22541,7 +22391,8 @@ async function handleXYMessage(params) {
       };
     }
     if (requiresNewTurn) {
-      const byChannel = { ...dispatchCfg.messages?.queue?.byChannel, "xiaoyi-channel": "followup" };
+      const byChannel = { ...dispatchCfg.messages?.queue?.byChannel };
+      byChannel["xiaoyi-channel"] = "followup";
       dispatchCfg = {
         ...dispatchCfg,
         messages: {
@@ -22715,7 +22566,7 @@ async function handleXYMessage(params) {
     try {
       const params2 = message.params;
       const sessionId = params2?.sessionId;
-      if (sessionId && turnRegistered) {
+      if (sessionId) {
         errLog.log(`[BOT] Cleaning up after error`);
         completeTask(sessionId, isTurnSuperseded(sessionId, errTaskId) ? errTaskId : void 0);
         if (errTaskId) {
@@ -22780,7 +22631,7 @@ function buildXYMediaPayload(mediaList) {
     MediaTypes: mediaTypes.length > 0 ? mediaTypes : void 0
   };
 }
-var PREVIOUS_TURN_SETTLE_TIMEOUT_MS, STEER_WAIT_KEEPALIVE_INTERVAL_MS, FULL_TURN_ADMISSION_TIMEOUT_MS;
+var CHANNEL_READY_POLL_MS, SDK_TURN_IDLE_TIMEOUT_MS, PREVIOUS_TURN_SETTLE_TIMEOUT_MS, STEER_WAIT_KEEPALIVE_INTERVAL_MS;
 var init_bot = __esm({
   "src/dispatch/bot.ts"() {
     init_runtime();
@@ -22808,9 +22659,10 @@ var init_bot = __esm({
     init_conversation_manager();
     init_approval_bridge();
     init_logger();
+    CHANNEL_READY_POLL_MS = 100;
+    SDK_TURN_IDLE_TIMEOUT_MS = 3e4;
     PREVIOUS_TURN_SETTLE_TIMEOUT_MS = 7e4;
     STEER_WAIT_KEEPALIVE_INTERVAL_MS = 1e4;
-    FULL_TURN_ADMISSION_TIMEOUT_MS = 3e4;
   }
 });
 
@@ -22892,7 +22744,7 @@ var init_trigger_handler = __esm({
 });
 
 // src/self-evolution-handler.ts
-import os6 from "os";
+import os7 from "os";
 import { readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "fs";
 async function handleSelfEvolutionEvent(context, cfg) {
   try {
@@ -23016,7 +22868,7 @@ async function handleSelfEvolutionStateGetEvent(context, cfg, runtime, wsManager
       agentId: cfg.agentId,
       sessionId,
       taskId,
-      msgDetail: JSON.stringify({ ...jsonRpcResponse, hostname: os6.hostname() })
+      msgDetail: JSON.stringify({ ...jsonRpcResponse, hostname: os7.hostname() })
     };
     await wsManager.sendMessage(sessionId, outboundMessage);
     logger.log(`[SELF_EVOLUTION_GET] command sent successfully, taskId: ${taskId}`);
@@ -23092,7 +22944,7 @@ var init_login_token_handler = __esm({
 // src/cron-query-handler.ts
 import { callGatewayTool as callGatewayTool2 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import fsp2 from "node:fs/promises";
-import os7 from "node:os";
+import os8 from "node:os";
 import path13 from "node:path";
 function isRecord2(value) {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -23641,7 +23493,7 @@ var init_cron_query_handler = __esm({
     init_config_manager();
     init_cron_push_map();
     init_logger();
-    ROOT_DIR = path13.join(os7.homedir(), ".openclaw");
+    ROOT_DIR = path13.join(os8.homedir(), ".openclaw");
     LEGACY_CRON_RUNS_DIR = path13.join(ROOT_DIR, "cron", "runs");
     GATEWAY_TIMEOUT_MS = 6e4;
     MAX_LIST_BODY_BYTES = 55e3;
@@ -23656,7 +23508,7 @@ var init_cron_query_handler = __esm({
 });
 
 // src/memory-query-handler.ts
-import * as os8 from "os";
+import * as os9 from "os";
 import * as path14 from "path";
 import {
   existsSync as existsSync4,
@@ -23938,11 +23790,11 @@ function handleMemoryStateGet() {
   return { memoryState: false };
 }
 function handleUserMdQuery() {
-  const filePath = path14.join(os8.homedir(), ".openclaw", "workspace", "USER.md");
+  const filePath = path14.join(os9.homedir(), ".openclaw", "workspace", "USER.md");
   return readMdFile(filePath);
 }
 function handleMemoryMdQuery() {
-  const filePath = path14.join(os8.homedir(), ".openclaw", "workspace", "MEMORY.md");
+  const filePath = path14.join(os9.homedir(), ".openclaw", "workspace", "MEMORY.md");
   return readMdFile(filePath);
 }
 function readMdFile(filePath) {
@@ -24041,7 +23893,7 @@ var init_memory_query_handler = __esm({
     init_config();
     init_logger();
     XIAOYIRUNTIME_PATH_PRIMARY = "/home/sandbox/.openclaw/.xiaoyiruntime";
-    XIAOYIRUNTIME_PATH_FALLBACK = `${os8.homedir()}/.openclaw/.xiaoyiruntime`;
+    XIAOYIRUNTIME_PATH_FALLBACK = `${os9.homedir()}/.openclaw/.xiaoyiruntime`;
     MEMORY_STATE_KEY = "MEMORYSTATE";
     MEMORY_FILE_ROOT = "/home/sandbox/.openclaw/workspace/memory/celia_memory";
     MemoryFileError = class extends Error {
@@ -24052,7 +23904,7 @@ var init_memory_query_handler = __esm({
       }
       errorCode;
     };
-    MEMORY_LOG_PATH = path14.join(os8.homedir(), ".openclaw", ".memory.log");
+    MEMORY_LOG_PATH = path14.join(os9.homedir(), ".openclaw", ".memory.log");
     MEMORY_HISTORY_DAYS = 7;
     MEMORY_RETENTION_DAYS = 30;
     MEMORY_HISTORY_MAX_ENTRIES = 100;
@@ -24105,7 +23957,7 @@ var init_update_task_conv_id_handler = __esm({
 
 // src/agent-topic-delete-handler.ts
 import fs18 from "node:fs";
-import os9 from "node:os";
+import os10 from "node:os";
 import path15 from "node:path";
 import {
   callGatewayTool as callGatewayTool3,
@@ -24201,7 +24053,7 @@ async function handleAgentTopicDeleteEvent(context, cfg, accountId) {
       log.log(
         `[TOPIC-DELETE] sessions.delete done: deleted=${deleted}, gatewayArchivedPurged=${archived.length}`
       );
-      const sessionsDir = path15.join(os9.homedir(), ".openclaw", "agents", agentId, "sessions");
+      const sessionsDir = path15.join(os10.homedir(), ".openclaw", "agents", agentId, "sessions");
       const fileDeleted = deleteSessionFilesByConvId(convId, sessionsDir);
       for (const p of fileDeleted) {
         if (!archived.includes(p)) archived.push(p);
@@ -24313,11 +24165,7 @@ async function monitorXYProvider(opts = {}) {
   let stopped = false;
   return new Promise((resolve2, reject) => {
     const messageHandler = (message, webSocketSessionId, serverId) => {
-      const messageMethod = message.method;
-      const clearsContext = messageMethod === "clearContext" || messageMethod === "clear_context";
-      const cancelsTask = messageMethod === "tasks/cancel" || messageMethod === "tasks_cancel";
-      const requestedSessionId = clearsContext || cancelsTask ? message.sessionId ?? message.params?.sessionId : message.params?.sessionId ?? message.sessionId;
-      const sessionId = typeof requestedSessionId === "string" && requestedSessionId ? requestedSessionId : webSocketSessionId;
+      const sessionId = typeof message.params?.sessionId === "string" && message.params.sessionId ? message.params.sessionId : typeof message.sessionId === "string" && message.sessionId ? message.sessionId : webSocketSessionId;
       const messageKey = `${sessionId}::${message.id}`;
       logger.log(`[MONITOR-HANDLER] messageHandler triggered: messageId=${message.id}`);
       trackEvent?.();
@@ -24373,7 +24221,8 @@ async function monitorXYProvider(opts = {}) {
         });
         return pending;
       };
-      if (clearsContext) {
+      const messageMethod = message.method;
+      if (messageMethod === "clearContext" || messageMethod === "clear_context") {
         void admission.enqueue(sessionId, async () => {
           await runTask();
           activeSelections.delete(sessionId);
@@ -24381,7 +24230,7 @@ async function monitorXYProvider(opts = {}) {
           logger.error(`XY gateway: queue processing failed: ${String(err)}`);
           activeMessages.delete(messageKey);
         });
-      } else if (cancelsTask) {
+      } else if (messageMethod === "tasks/cancel" || messageMethod === "tasks_cancel") {
         logger.log(`[MONITOR] CANCEL: executing concurrently, messageKey=${messageKey}`);
         void runTask().catch((err) => {
           logger.error(`XY gateway: concurrent cancel task failed for ${messageKey}: ${String(err)}`);
@@ -24397,10 +24246,8 @@ async function monitorXYProvider(opts = {}) {
           const steerMode = cfg.messages?.queue?.mode === "steer";
           const hasActiveRun = hasActiveTask(parsed.sessionId);
           const nativeImages = selection.modelCapabilities.supportsNativeImages && extractFileParts(parsed.parts).some(isImageAttachment);
-          const activeSelection = activeSelections.get(sessionId);
-          const selectionPending = !activeSelection && activeTurnTasks.has(sessionId);
-          const changedSelection = hasActiveRun && (selectionPending || modelSelectionChanged(activeSelection, selection));
-          forceNewTurn = nativeImages || changedSelection || admission.hasBarrier(sessionId);
+          const changedSelection = hasActiveRun && modelSelectionChanged(activeSelections.get(sessionId), selection);
+          forceNewTurn = hasActiveRun && nativeImages || changedSelection || admission.hasBarrier(sessionId);
           if (steerMode && hasActiveRun && !forceNewTurn) {
             logger.log(`[MONITOR] STEER MODE: executing concurrently, sessionId=${parsed.sessionId}, messageKey=${messageKey}`);
             void runTask().catch((err) => {
@@ -26237,6 +26084,21 @@ var xyConfigSchema = {
       items: { type: "string" },
       description: 'A2A sessionIds that never change (e.g. ["00000000"]). For these, clearContext triggers an explicit openclaw session reset (sessions.reset) to isolate context. Set to [] to disable.',
       default: ["00000000"]
+    },
+    reconnectBaseMs: {
+      type: "number",
+      description: "Base delay in ms for WebSocket reconnect backoff (full jitter)",
+      default: 1e3
+    },
+    reconnectMaxMs: {
+      type: "number",
+      description: "Max cap in ms for WebSocket reconnect backoff",
+      default: 3e4
+    },
+    reconnectFirstMaxMs: {
+      type: "number",
+      description: "First reconnect attempt is uniformly spread over [0, this] ms so mass reconnects after a server outage don't arrive as one burst",
+      default: 3e3
     }
   },
   required: ["apiKey", "agentId", "uid", "apiId", "pushId"]
@@ -26915,18 +26777,6 @@ function filterToolsByDevice(tools, deviceType) {
   }
 }
 
-// src/tools/tool-visibility.ts
-init_app_version();
-var STEPINFO_VERSION_GATED_TOOLS = /* @__PURE__ */ new Set(["ask_user"]);
-var ALWAYS_HIDDEN_TOOLS = /* @__PURE__ */ new Set(["ask_user"]);
-function filterToolsByAppVersion(tools, appVer) {
-  return tools.filter((tool) => !ALWAYS_HIDDEN_TOOLS.has(tool.name) && isToolVisibleForAppVersion(tool.name, appVer));
-}
-function isToolVisibleForAppVersion(toolName, appVer) {
-  if (!STEPINFO_VERSION_GATED_TOOLS.has(toolName)) return true;
-  return typeof appVer === "string" && appVer.length > 0 && !isBelowLegacyAppVersion(appVer);
-}
-
 // src/channel.ts
 init_session_manager();
 init_logger();
@@ -27418,6 +27268,7 @@ b. \u64CD\u4F5C\u8D85\u65F6\u65F6\u95F4\u4E3A2\u5206\u949F\uFF08120\u79D2\uFF09\
 
 // src/tools/send-html-card-tool.ts
 init_formatter();
+init_client();
 init_session_manager();
 init_logger();
 var sendHtmlCardTool = {
@@ -27449,7 +27300,11 @@ c. \u4EC5\u5F53\u7528\u6237\u6216\u8005skill\u4E2D\u663E\u793A\u8BF4\u660E\u4F7F
     required: []
   },
   async execute(toolCallId, params) {
-    const _c = getCurrentSessionContext();
+    let _c = getCurrentSessionContext();
+    const isCron = isCronToolCall(toolCallId) || (_c?.sessionId ?? "").startsWith("cron-");
+    if (!_c && isCron) {
+      _c = { config: getCachedXYWebSocketManager().config };
+    }
     const { config, sessionId, taskId, messageId } = _c;
     if (!params.htmlUrl && !params.htmlLocal) {
       throw new Error("htmlUrl \u548C htmlLocal \u81F3\u5C11\u9700\u8981\u586B\u5199\u4E00\u4E2A");
@@ -27486,21 +27341,25 @@ c. \u4EC5\u5F53\u7528\u6237\u6216\u8005skill\u4E2D\u663E\u793A\u8BF4\u660E\u4F7F
           displayType: "DisplayFaCard"
         }
       ];
-      await sendCard({
-        config,
-        sessionId,
-        taskId,
-        messageId,
-        toolCallId,
-        cardsInfo
-      });
+      if (isCron) {
+        logger.log(`[SEND-HTML-CARD] Cron scenario detected (toolCallId=${toolCallId}), skip card delivery`);
+      } else {
+        await sendCard({
+          config,
+          sessionId,
+          taskId,
+          messageId,
+          toolCallId,
+          cardsInfo
+        });
+      }
       return {
         content: [
           {
             type: "text",
             text: JSON.stringify({
               success: true,
-              message: `HTML\u5361\u7247\u53D1\u9001\u6210\u529F\uFF0Chtml\u7684\u5728\u7EBF\u94FE\u63A5\u5982\u4E0B\uFF0C\u751F\u6210markdown\u8D85\u94FE\u63A5\u65F6\u4E0E\u6B64url\u9700\u4FDD\u6301\u5B8C\u6574\u4E00\u81F4 ${url}`
+              message: isCron ? `\u5B9A\u65F6\u4EFB\u52A1\u573A\u666F\uFF0CHTML\u5361\u7247\u4E0D\u4E0B\u53D1\uFF0Chtml\u7684\u5728\u7EBF\u94FE\u63A5\u5982\u4E0B\uFF0C\u751F\u6210markdown\u8D85\u94FE\u63A5\u65F6\u4E0E\u6B64url\u9700\u4FDD\u6301\u5B8C\u6574\u4E00\u81F4 ${url}` : `HTML\u5361\u7247\u53D1\u9001\u6210\u529F\uFF0Chtml\u7684\u5728\u7EBF\u94FE\u63A5\u5982\u4E0B\uFF0C\u751F\u6210markdown\u8D85\u94FE\u63A5\u65F6\u4E0E\u6B64url\u9700\u4FDD\u6301\u5B8C\u6574\u4E00\u81F4 ${url}`
             })
           }
         ]
@@ -32418,6 +32277,583 @@ var agentAsSkillTool = {
   }
 };
 
+// src/tools/discover-cross-devices-tool.ts
+init_formatter();
+init_client();
+init_logger();
+init_session_manager();
+var DISCOVER_DEVICES_INTENT = "SearchAllDeviceInfo";
+var DISCOVER_DEVICES_BUNDLE = "com.huawei.hmos.vassistant";
+var DISCOVER_DEVICES_TIMEOUT_MS = 3e4;
+var LOG_TAG = "[GetPCDeviceList]";
+var DISCOVER_DEVICES_STATUS_TEXT = "\u6B63\u5728\u67E5\u8BE2\u8BBE\u5907\u5217\u8868...";
+var DEVICE_TYPE_LABELS = {
+  "14": "phone",
+  "17": "pad",
+  "131": "car",
+  "2607": "PC"
+};
+function buildResultText(result) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(result)
+      }
+    ]
+  };
+}
+function normalizeDevices(rawDevices) {
+  if (!Array.isArray(rawDevices)) {
+    return [];
+  }
+  return rawDevices.filter((item) => Boolean(item) && typeof item === "object").map((device) => {
+    const networkId = typeof device.networkId === "string" ? device.networkId : typeof device.deviceId === "string" ? device.deviceId : "";
+    const deviceTypeId = typeof device.deviceTypeId === "string" ? device.deviceTypeId : typeof device.deviceType === "string" ? device.deviceType : "";
+    return {
+      networkId,
+      deviceName: typeof device.deviceName === "string" ? device.deviceName : "",
+      deviceTypeId,
+      deviceTypeLabel: DEVICE_TYPE_LABELS[deviceTypeId] ?? "unknown",
+      nearby: device.nearby === true,
+      rawDevice: device
+    };
+  });
+}
+function inferDesiredDeviceTypes(query) {
+  const normalized = query.toLowerCase();
+  if (/(pc|computer|desktop|laptop|notebook)/iu.test(normalized) || /电脑|台式机|笔记本/iu.test(query)) {
+    return ["2607"];
+  }
+  if (/(tablet|pad|ipad)/iu.test(normalized) || /平板/iu.test(query)) {
+    return ["17"];
+  }
+  if (/(phone|mobile)/iu.test(normalized) || /手机/iu.test(query)) {
+    return ["14"];
+  }
+  return [];
+}
+function sortByNearby(devices) {
+  return [...devices].sort((a, b) => Number(b.nearby) - Number(a.nearby));
+}
+function recommendDevices(query, devices) {
+  const desiredTypes = inferDesiredDeviceTypes(query);
+  if (desiredTypes.length === 0) {
+    return {
+      recommendedDevices: [],
+      recommendationReason: "No explicit target device type was detected in the query.",
+      needsUserSelection: devices.length > 1,
+      selectionPrompt: devices.length > 1 ? "The query does not identify a unique device type. Ask the user to choose a target device by deviceName or networkId before sending a cross-device task." : ""
+    };
+  }
+  const matches = devices.filter((device) => desiredTypes.includes(device.deviceTypeId));
+  if (matches.length === 0) {
+    return {
+      recommendedDevices: [],
+      recommendationReason: `No discovered device matches requested type(s): ${desiredTypes.join(", ")}.`,
+      needsUserSelection: false,
+      selectionPrompt: ""
+    };
+  }
+  const sortedMatches = sortByNearby(matches);
+  return {
+    recommendedDevices: sortedMatches,
+    recommendationReason: `Matched requested device type(s): ${desiredTypes.join(", ")}. Nearby devices are ranked first.`,
+    needsUserSelection: sortedMatches.length > 1,
+    selectionPrompt: sortedMatches.length > 1 ? "Multiple candidate devices match the user request. Ask the user to choose one target device by deviceName or networkId before calling send_cross_device_task." : ""
+  };
+}
+var discoverCrossDevicesTool = {
+  name: "discover_cross_devices",
+  label: "\u53D1\u73B0\u8DE8\u8BBE\u5907\u534F\u4F5C\u8BBE\u5907",
+  description: `\u8DE8\u8BBE\u5907\u534F\u4F5C\u7684\u8BBE\u5907\u53D1\u73B0\u5DE5\u5177\u3002
+
+\u5F53\u7528\u6237\u660E\u786E\u8868\u8FBE\u8981\u4ECE\u53E6\u4E00\u53F0\u8BBE\u5907\u83B7\u53D6\u3001\u67E5\u627E\u3001\u4F7F\u7528\u6216\u64CD\u4F5C\u5185\u5BB9\u65F6\uFF0C\u5FC5\u987B\u4F18\u5148\u8C03\u7528\u672C\u5DE5\u5177\uFF0C\u4F8B\u5982\u4ECE PC\u3001\u7535\u8111\u3001\u5E73\u677F\u3001\u624B\u673A\u7B49\u8BBE\u5907\u83B7\u53D6\u6587\u4EF6\u6216\u67E5\u627E\u5185\u5BB9\u3002
+
+\u672C\u5DE5\u5177\u53EA\u505A\u8BBE\u5907\u53D1\u73B0\u548C\u76EE\u6807\u8BBE\u5907\u63A8\u8350\uFF0C\u4E0D\u4F1A\u8BFB\u53D6\u526F\u8BBE\u5907\u6587\u4EF6\u5185\u5BB9\uFF0C\u4E0D\u4F1A\u4E0A\u4F20\u6587\u4EF6\uFF0C\u4E5F\u4E0D\u4F1A\u771F\u6B63\u4E0B\u53D1\u8DE8\u7AEF\u6267\u884C\u4EFB\u52A1\u3002\u4E0B\u53D1\u8DE8\u7AEF\u6267\u884C\u4EFB\u52A1\u9700\u8981\u4F7F\u7528SendCrossDeviceTaskTool`,
+  parameters: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "The user's original cross-device request, used to recommend the target device type."
+      }
+    },
+    required: ["query"]
+  },
+  async execute(_toolCallId, params) {
+    const _c = getCurrentSessionContext();
+    const { config, sessionId, taskId, messageId } = _c;
+    const query = typeof params.query === "string" ? params.query.trim() : "";
+    logger.log(`${LOG_TAG} tool invoked`);
+    if (!query) {
+      return buildResultText({
+        success: false,
+        rawOutputs: null,
+        devices: [],
+        recommendedDevices: [],
+        recommendationReason: "",
+        message: "Missing required parameter: query."
+      });
+    }
+    const wsManager = getCachedXYWebSocketManager();
+    const command = {
+      header: {
+        namespace: "Common",
+        name: "Action"
+      },
+      payload: {
+        needUploadResult: true,
+        actionResponseConfig: {},
+        response: [],
+        executeParam: {
+          executeMode: "background",
+          intentName: DISCOVER_DEVICES_INTENT,
+          intentParam: {},
+          bundleName: DISCOVER_DEVICES_BUNDLE
+        }
+      }
+    };
+    return new Promise((resolve2) => {
+      let timeout;
+      let handler;
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timeout);
+        wsManager.off("data-event", handler);
+      };
+      const finish = (result) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        resolve2(buildResultText(result));
+      };
+      handler = (event) => {
+        if (event.intentName !== DISCOVER_DEVICES_INTENT) {
+          return;
+        }
+        const rawOutputs = event.outputs ?? {};
+        const code = rawOutputs.code;
+        const success = event.status === "success" && String(code) === "0";
+        const devices = normalizeDevices(rawOutputs.result?.devices);
+        const recommendation = recommendDevices(query, devices);
+        logger.log(`${LOG_TAG} completed, success=${success}, deviceCount=${devices.length}, recommendedCount=${recommendation.recommendedDevices.length}`);
+        finish({
+          success,
+          rawOutputs,
+          devices,
+          recommendedDevices: recommendation.recommendedDevices,
+          recommendationReason: recommendation.recommendationReason,
+          needsUserSelection: recommendation.needsUserSelection,
+          selectionPrompt: recommendation.selectionPrompt,
+          message: success ? recommendation.needsUserSelection ? `Discovered ${devices.length} device(s). Multiple candidates may match; ask the user to choose the target device before sending a cross-device task.` : `Discovered ${devices.length} device(s). The model should choose the final target device based on the user request.` : "Device discovery failed on the device side."
+        });
+      };
+      timeout = setTimeout(() => {
+        logger.log(`${LOG_TAG} timeout waiting UploadExeResult after ${DISCOVER_DEVICES_TIMEOUT_MS}ms`);
+        finish({
+          success: false,
+          rawOutputs: null,
+          devices: [],
+          recommendedDevices: [],
+          recommendationReason: "",
+          message: `Device discovery timed out after ${DISCOVER_DEVICES_TIMEOUT_MS / 1e3} seconds.`
+        });
+      }, DISCOVER_DEVICES_TIMEOUT_MS);
+      wsManager.on("data-event", handler);
+      sendStatusUpdate({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        text: DISCOVER_DEVICES_STATUS_TEXT,
+        state: "working"
+      }).then(() => sendCommand({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        command
+      })).catch((error) => {
+        logger.error(`${LOG_TAG} failed to send device discovery command: ${error instanceof Error ? error.message : String(error)}`);
+        finish({
+          success: false,
+          rawOutputs: null,
+          devices: [],
+          recommendedDevices: [],
+          recommendationReason: "",
+          message: `Failed to send device discovery command: ${error instanceof Error ? error.message : String(error)}`
+        });
+      });
+    });
+  }
+};
+
+// src/tools/send-cross-device-task-tool.ts
+init_formatter();
+init_client();
+init_logger();
+init_session_manager();
+init_app_version();
+init_pending_files();
+import os5 from "os";
+var LOG_TAG2 = "[SendPcDeviceTask]";
+var SEND_CROSS_RESULT_LOG_TAG2 = "[SendCrossResult]";
+var CROSS_DEVICE_TASK_TIMEOUT_MS = 5 * 6e4;
+var PEER_TASK_COMPLETED_STATUS_TEXT = "\u5BF9\u7AEF\u8BBE\u5907\u5DF2\u5B8C\u6210\u5F53\u524D\u4EFB\u52A1\uFF0C\u6B63\u5728\u5904\u7406\u4E2D ...";
+function buildResultText2(result) {
+  return {
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify(result)
+      }
+    ]
+  };
+}
+function buildModelToolResult(result) {
+  const sentFiles = result.sentFiles;
+  const resultStatus = result.success ? sentFiles.length > 0 ? "\u5BF9\u7AEF\u8BBE\u5907\u6267\u884C\u4EFB\u52A1\u6210\u529F\u4E14\u8FD4\u56DE\u6709\u6587\u4EF6" : "\u5BF9\u7AEF\u8BBE\u5907\u6267\u884C\u4EFB\u52A1\u6210\u529F\u4E14\u8FD4\u56DE\u65E0\u6587\u4EF6" : "\u5BF9\u7AEF\u8BBE\u5907\u4EFB\u52A1\u5931\u8D25";
+  const baseMessage = result.message || "\u5BF9\u7AEF\u8BBE\u5907\u672A\u8FD4\u56DE\u5177\u4F53\u7ED3\u679C\u3002";
+  let message = `\u8DE8\u7AEF\u4EFB\u52A1\u6267\u884C\u7ED3\u679C\uFF1A${baseMessage}`;
+  if (resultStatus === "\u5BF9\u7AEF\u8BBE\u5907\u6267\u884C\u4EFB\u52A1\u6210\u529F\u4E14\u8FD4\u56DE\u6709\u6587\u4EF6") {
+    if (result.autoSendFileToUser?.success) {
+      message += "\n\n\u5BF9\u7AEF\u8BBE\u5907\u8FD4\u56DE\u4E86\u6587\u4EF6\uFF0C\u7CFB\u7EDF\u5DF2\u81EA\u52A8\u5C06\u6587\u4EF6\u5361\u7247\u53D1\u9001\u7ED9\u7528\u6237\u3002\u8BF7\u4F60\u57FA\u4E8E\u8DE8\u7AEF\u4EFB\u52A1\u7ED3\u679C\u751F\u6210\u6700\u7EC8\u56DE\u590D\uFF0C\u544A\u77E5\u7528\u6237\u4EFB\u52A1\u5DF2\u5B8C\u6210\u4E14\u6587\u4EF6\u5DF2\u53D1\u9001\u3002";
+    } else {
+      const errorMessage = result.autoSendFileToUser?.error || "\u672A\u77E5\u9519\u8BEF";
+      message += `
+
+\u5BF9\u7AEF\u8BBE\u5907\u8FD4\u56DE\u4E86\u6587\u4EF6\uFF0C\u4F46\u7CFB\u7EDF\u81EA\u52A8\u53D1\u9001\u6587\u4EF6\u5361\u7247\u5931\u8D25\uFF1A${errorMessage}\u3002\u8BF7\u4F60\u5411\u7528\u6237\u8BF4\u660E\u4EFB\u52A1\u5DF2\u5B8C\u6210\u4F46\u6587\u4EF6\u53D1\u9001\u5931\u8D25\u3002`;
+    }
+  } else if (resultStatus === "\u5BF9\u7AEF\u8BBE\u5907\u6267\u884C\u4EFB\u52A1\u6210\u529F\u4E14\u8FD4\u56DE\u65E0\u6587\u4EF6") {
+    message += "\n\n\u5BF9\u7AEF\u8BBE\u5907\u672A\u8FD4\u56DE\u6587\u4EF6\u3002\u8BF7\u4F60\u76F4\u63A5\u6839\u636E\u8DE8\u7AEF\u4EFB\u52A1\u7ED3\u679C\u5411\u7528\u6237\u603B\u7ED3\u5B8C\u6210\u60C5\u51B5\u3002";
+  } else {
+    message += "\n\n\u5BF9\u7AEF\u8BBE\u5907\u4EFB\u52A1\u5931\u8D25\u3002\u8BF7\u4F60\u5411\u7528\u6237\u8BF4\u660E\u5931\u8D25\u60C5\u51B5\uFF0C\u5E76\u7ED9\u51FA\u53EF\u91CD\u8BD5\u6216\u8C03\u6574\u4EFB\u52A1\u63CF\u8FF0\u7684\u5EFA\u8BAE\u3002";
+  }
+  return {
+    message,
+    resultStatus
+  };
+}
+function buildCrossDeviceResult(params) {
+  const result = {
+    success: params.success,
+    code: params.code,
+    message: params.message,
+    sentFiles: params.sentFiles,
+    rawEvent: params.rawEvent
+  };
+  return result;
+}
+function collectSentFileCards(sentFiles) {
+  const cardsByFileId = /* @__PURE__ */ new Map();
+  for (const card of sentFiles) {
+    const fileId = typeof card.fileId === "string" ? card.fileId.trim() : "";
+    const fileName = typeof card.fileName === "string" ? card.fileName.trim() : "";
+    const mimeType = typeof card.mimeType === "string" ? card.mimeType.trim() : "";
+    if (!fileId || !fileName || cardsByFileId.has(fileId)) {
+      continue;
+    }
+    cardsByFileId.set(fileId, {
+      fileId,
+      fileName,
+      ...mimeType ? { mimeType } : {}
+    });
+  }
+  return Array.from(cardsByFileId.values());
+}
+function countSentFileCards(sentFiles) {
+  return collectSentFileCards(sentFiles).length;
+}
+async function sendFileCardsToUser(ctx, fileCards) {
+  const { config, sessionId, taskId, messageId } = ctx;
+  const deferToTerminalFlush = !isLegacyAppVersion(taskId) && !sessionId.startsWith("cron-") && !ctx.isCron;
+  if (deferToTerminalFlush) {
+    appendPendingFiles(taskId, fileCards.map((card) => ({
+      fileName: card.fileName,
+      mimeType: card.mimeType,
+      fileId: card.fileId
+    })));
+    logger.log(`${SEND_CROSS_RESULT_LOG_TAG2} queued ${fileCards.length} file card(s) for post-body flush (before references), taskId=${taskId}`);
+    return fileCards.map(({ fileName, fileId }) => ({ fileName, fileId }));
+  }
+  const wsManager = getCachedXYWebSocketManager();
+  const sentFileCards = [];
+  for (const card of fileCards) {
+    const agentResponse = {
+      msgType: "agent_response",
+      agentId: config.agentId,
+      sessionId,
+      taskId,
+      msgDetail: JSON.stringify({
+        jsonrpc: "2.0",
+        id: messageId,
+        result: {
+          kind: "artifact-update",
+          isNew: true,
+          append: true,
+          lastChunk: false,
+          final: false,
+          artifact: {
+            artifactId: taskId,
+            parts: [
+              {
+                kind: "file",
+                file: {
+                  name: card.fileName,
+                  mimeType: card.mimeType,
+                  fileId: card.fileId
+                }
+              }
+            ]
+          }
+        },
+        error: { code: 0 },
+        hostname: os5.hostname()
+      })
+    };
+    logger.log(`${SEND_CROSS_RESULT_LOG_TAG2} sending file card by fileId, fileName=${card.fileName}`);
+    await wsManager.sendMessage(sessionId, agentResponse);
+    sentFileCards.push({ fileName: card.fileName, fileId: card.fileId });
+  }
+  return sentFileCards;
+}
+async function autoSendFileToUserIfNeeded(result, ctx) {
+  const sentFiles = Array.isArray(result.sentFiles) ? result.sentFiles : [];
+  if (sentFiles.length === 0) {
+    return result;
+  }
+  const fileCards = collectSentFileCards(sentFiles);
+  if (fileCards.length === 0) {
+    const errorMessage = "Cross-device result contains no valid fileCards.";
+    logger.error(`${SEND_CROSS_RESULT_LOG_TAG2} auto file card send skipped, error=${errorMessage}`);
+    return {
+      ...result,
+      autoSendFileToUser: {
+        success: false,
+        error: errorMessage
+      }
+    };
+  }
+  logger.log(`${SEND_CROSS_RESULT_LOG_TAG2} auto sending cross-device file cards, fileCardCount=${fileCards.length}`);
+  try {
+    const sendFileResult = {
+      fileCards: await sendFileCardsToUser(ctx, fileCards)
+    };
+    logger.log(`${SEND_CROSS_RESULT_LOG_TAG2} auto file card send completed, fileCardCount=${sendFileResult.fileCards.length}`);
+    return {
+      ...result,
+      autoSendFileToUser: {
+        success: true,
+        result: sendFileResult
+      }
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    logger.error(`${SEND_CROSS_RESULT_LOG_TAG2} auto file card send failed, error=${errorMessage}`);
+    return {
+      ...result,
+      autoSendFileToUser: {
+        success: false,
+        error: errorMessage
+      }
+    };
+  }
+}
+function normalizeTargetDeviceInfo(value) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const candidate = value;
+  const networkId = typeof candidate.networkId === "string" ? candidate.networkId.trim() : typeof candidate.deviceId === "string" ? candidate.deviceId.trim() : "";
+  const deviceName = typeof candidate.deviceName === "string" ? candidate.deviceName.trim() : "";
+  const deviceTypeId = typeof candidate.deviceTypeId === "string" ? candidate.deviceTypeId.trim() : typeof candidate.deviceType === "string" ? candidate.deviceType.trim() : "";
+  if (!networkId || !deviceName || !deviceTypeId) {
+    return null;
+  }
+  return {
+    networkId,
+    deviceName,
+    deviceTypeId
+  };
+}
+function buildUnifiedDistributeCommand(query, targetDeviceInfo, distributionSessionId) {
+  return {
+    header: {
+      namespace: "DistributionInteraction",
+      name: "UnifiedDistribute"
+    },
+    payload: {
+      targetDeviceInfo,
+      crossDeviceContent: {
+        query,
+        contexts: {
+          agentClientContext: {
+            header: {
+              namespace: "System",
+              name: "ClientContext"
+            },
+            payload: {
+              agentId: "",
+              isSupportAgent: true,
+              distributionSessionId,
+              localNetworkId: targetDeviceInfo.networkId
+            }
+          }
+        }
+      }
+    }
+  };
+}
+var sendCrossDeviceTaskTool = {
+  name: "send_cross_device_task",
+  label: "\u4E0B\u53D1\u8DE8\u8BBE\u5907\u534F\u4F5C\u4EFB\u52A1",
+  description: `\u5411\u7528\u6237\u5DF2\u7ECF\u9009\u5B9A\u7684\u76EE\u6807\u8BBE\u5907\u4E0B\u53D1\u8DE8\u8BBE\u5907\u534F\u4F5C\u4EFB\u52A1\u3002
+
+\u4F7F\u7528\u6D41\u7A0B\uFF1A
+1. \u5FC5\u987B\u5148\u8C03\u7528 discover_cross_devices \u83B7\u53D6\u8BBE\u5907\u5217\u8868\u3002
+2. \u6839\u636E\u7528\u6237\u539F\u59CB\u9700\u6C42\u9009\u62E9\u552F\u4E00\u76EE\u6807\u8BBE\u5907\u3002
+3. \u5982\u679C\u5B58\u5728\u591A\u4E2A\u540C\u7C7B\u578B\u5019\u9009\u8BBE\u5907\uFF0C\u6216\u65E0\u6CD5\u5224\u65AD\u76EE\u6807\u8BBE\u5907\uFF0C\u5FC5\u987B\u5148\u8BE2\u95EE\u7528\u6237\u9009\u62E9\u8BBE\u5907\uFF0C\u4E0D\u8981\u8C03\u7528\u672C\u5DE5\u5177\u3002
+4. \u53EA\u6709\u5F53 targetDeviceInfo \u4E2D\u7684 networkId\u3001deviceName\u3001deviceTypeId \u90FD\u5DF2\u660E\u786E\u65F6\uFF0C\u624D\u8C03\u7528\u672C\u5DE5\u5177\u3002
+5. \u4F20\u5165\u7684query\u5FC5\u987B\u662F\u7528\u6237\u539F\u59CBquery\uFF0C\u4E0D\u8981\u505A\u4EFB\u4F55\u66F4\u6539\u3002`,
+  parameters: {
+    type: "object",
+    properties: {
+      query: {
+        type: "string",
+        description: "\u7528\u6237\u539F\u59CB\u8DE8\u8BBE\u5907\u4EFB\u52A1\u9700\u6C42\uFF0C\u4F8B\u5982\uFF1A\u4ECE PC \u83B7\u53D6\u67D0\u6587\u4EF6\u3002"
+      },
+      targetDeviceInfo: {
+        type: "object",
+        description: "\u6A21\u578B\u4ECE discover_cross_devices \u8FD4\u56DE\u5217\u8868\u4E2D\u9009\u5B9A\u7684\u552F\u4E00\u76EE\u6807\u8BBE\u5907\u3002",
+        properties: {
+          networkId: {
+            type: "string",
+            description: "\u76EE\u6807\u8BBE\u5907\u6807\u8BC6 networkId\u3002"
+          },
+          deviceName: {
+            type: "string",
+            description: "\u76EE\u6807\u8BBE\u5907\u540D\u79F0\u3002"
+          },
+          deviceTypeId: {
+            type: "string",
+            description: "\u76EE\u6807\u8BBE\u5907\u7C7B\u578B\u7F16\u53F7 deviceTypeId\uFF0C\u4F8B\u5982 14\u300117\u3001131\u30012607\u3002"
+          }
+        },
+        required: ["networkId", "deviceName", "deviceTypeId"]
+      }
+    },
+    required: ["query", "targetDeviceInfo"]
+  },
+  async execute(_toolCallId, params) {
+    const _c = getCurrentSessionContext();
+    const { config, sessionId, taskId, messageId } = _c;
+    const query = typeof params.query === "string" ? params.query.trim() : "";
+    const targetDeviceInfo = normalizeTargetDeviceInfo(params.targetDeviceInfo);
+    if (!query || !targetDeviceInfo) {
+      return buildResultText2({
+        message: "Missing required parameters: query and targetDeviceInfo.networkId/deviceName/deviceTypeId.",
+        resultStatus: "\u5BF9\u7AEF\u8BBE\u5907\u4EFB\u52A1\u5931\u8D25"
+      });
+    }
+    const wsManager = getCachedXYWebSocketManager();
+    const distributionSessionId = getCurrentSessionContext()?.distributionSessionId || sessionId;
+    const command = buildUnifiedDistributeCommand(query, targetDeviceInfo, distributionSessionId);
+    const statusText = `\u6B63\u5728\u8C03\u7528${targetDeviceInfo.deviceName}\u6267\u884C\u201C${query}\u201D\u8DE8\u8BBE\u5907\u4EFB\u52A1...`;
+    logger.log(`${LOG_TAG2} sending task to ${targetDeviceInfo.deviceName}, distributionSessionId=${distributionSessionId}`);
+    return new Promise((resolve2) => {
+      let timeout;
+      let handler;
+      let settled = false;
+      let resultHandlingStarted = false;
+      const cleanup = () => {
+        clearTimeout(timeout);
+        wsManager.off("cross-device-task-result", handler);
+      };
+      const finish = (result) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        const modelResult = buildModelToolResult(result);
+        logger.log(`${LOG_TAG2} completed, success=${result.success}, code=${result.code}, fileCardCount=${countSentFileCards(result.sentFiles)}`);
+        cleanup();
+        resolve2(buildResultText2(modelResult));
+      };
+      handler = (event) => {
+        if (event.sessionId && event.sessionId !== sessionId && event.sessionId !== distributionSessionId) {
+          return;
+        }
+        logger.log(`${SEND_CROSS_RESULT_LOG_TAG2} received result, status=${event.status}, code=${event.code}, fileCardCount=${countSentFileCards(event.sentFiles)}`);
+        void (async () => {
+          if (resultHandlingStarted) {
+            return;
+          }
+          resultHandlingStarted = true;
+          clearTimeout(timeout);
+          try {
+            await sendStatusUpdate({
+              config,
+              sessionId,
+              taskId,
+              messageId,
+              text: PEER_TASK_COMPLETED_STATUS_TEXT,
+              state: "working"
+            });
+          } catch (error) {
+            logger.error(`${SEND_CROSS_RESULT_LOG_TAG2} failed to send peer task completed status update: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          const result = buildCrossDeviceResult({
+            success: event.status === "success",
+            code: event.code,
+            message: event.message,
+            sentFiles: event.sentFiles,
+            rawEvent: event.rawEvent
+          });
+          const resultWithFileSend = await autoSendFileToUserIfNeeded(result, getCurrentSessionContext());
+          finish(resultWithFileSend);
+        })();
+      };
+      timeout = setTimeout(() => {
+        logger.log(`${LOG_TAG2} timeout waiting cross-device result after ${CROSS_DEVICE_TASK_TIMEOUT_MS}ms`);
+        finish({
+          success: false,
+          code: "",
+          message: `Cross-device task timed out after ${CROSS_DEVICE_TASK_TIMEOUT_MS / 1e3} seconds.`,
+          sentFiles: [],
+          rawEvent: null
+        });
+      }, CROSS_DEVICE_TASK_TIMEOUT_MS);
+      wsManager.on("cross-device-task-result", handler);
+      sendStatusUpdate({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        text: statusText,
+        state: "working"
+      }).then(() => sendCommand({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        command
+      })).catch((error) => {
+        logger.error(`${LOG_TAG2} failed to send cross-device task command: ${error instanceof Error ? error.message : String(error)}`);
+        finish({
+          success: false,
+          code: "",
+          message: `Failed to send cross-device task command: ${error instanceof Error ? error.message : String(error)}`,
+          sentFiles: [],
+          rawEvent: null
+        });
+      });
+    });
+  }
+};
+
 // src/tools/display-a2ui-card-bypath-tool.ts
 init_formatter();
 init_logger();
@@ -32507,6 +32943,145 @@ var displayA2UICardByPathTool = {
   }
 };
 
+// src/tools/check-plugin-privilege-tool.ts
+init_client();
+init_formatter();
+init_session_manager();
+init_logger();
+var INTENT_PERMISSION_MAP = {
+  GetCurrentLocation: ["ohos.permission.LOCATION", "ohos.permission.APPROXIMATELY_LOCATION"],
+  SearchCalendarEvent: ["ohos.permission.READ_WHOLE_CALENDAR"],
+  CreateCalendarEvent: ["ohos.permission.WRITE_WHOLE_CALENDAR"],
+  DeleteCalendarEvent: ["ohos.permission.WRITE_WHOLE_CALENDAR"],
+  ModifyCalendarEvent: ["ohos.permission.WRITE_WHOLE_CALENDAR"],
+  SearchNote: ["ohos.permission.READ_NOTE"],
+  CreateNote: ["ohos.permission.WRITE_NOTE"],
+  ModifyNote: ["ohos.permission.WRITE_NOTE"],
+  SearchContactLocal: ["ohos.permission.READ_CONTACTS"],
+  SearchPhotoVideo: ["ohos.permission.READ_IMAGEVIDEO"],
+  SaveMediaToGallery: ["ohos.permission.WRITE_IMAGEVIDEO"],
+  SearchFile: ["ohos.permission.FILE_ACCESS_MANAGER"],
+  SaveFileToFileManager: ["ohos.permission.FILE_SAVE_MANAGER"],
+  SearchAlarm: ["ohos.permission.READ_ALARM"],
+  CreateAlarm: ["ohos.permission.WRITE_ALARM"],
+  ModifyAlarm: ["ohos.permission.WRITE_ALARM"],
+  DeleteAlarm: ["ohos.permission.WRITE_ALARM"],
+  SearchMessage: ["ohos.permission.READ_SMS"],
+  SendShortMessage: ["ohos.permission.SEND_MESSAGES"],
+  StartCall: ["ohos.permission.PLACE_CALL"]
+};
+var checkPluginPrivilegeTool = {
+  name: "check_plugin_privilege",
+  label: "Check Plugin Privilege",
+  description: "\u5B9A\u65F6\u4EFB\u52A1\u6743\u9650\u68C0\u67E5\u5DE5\u5177\u3002\u3010\u4F7F\u7528\u573A\u666F\u3011\u4EC5\u5728\u521B\u5EFA\u5B9A\u65F6\u4EFB\u52A1\u65F6\u4F7F\u7528\uFF0C\u4E25\u7981\u5728\u5176\u4ED6\u573A\u666F\u8C03\u7528\u3002\u5F53\u8BC6\u522B\u5230\u5B9A\u65F6\u4EFB\u52A1\u4E2D\u9700\u8981\u4F7F\u7528\u7528\u6237\u8BBE\u5907\u4FA7\u5DE5\u5177\u65F6\uFF0C\u5FC5\u987B\u8C03\u7528\u6B64\u5DE5\u5177\u8FDB\u884C\u6743\u9650\u68C0\u67E5\u3002\u3010\u8C03\u7528\u524D\u63D0\u3011\u8C03\u7528\u6B64\u5DE5\u5177\u524D\uFF0C\u5FC5\u987B\u786E\u8BA4\u7528\u6237\u5B9A\u65F6\u4EFB\u52A1\u4E2D\u63D0\u5230\u7684\u5DE5\u5177\u5728\u5F53\u524D\u6A21\u578B\u53EF\u4F7F\u7528\u7684\u5DE5\u5177\u5217\u8868\u4E2D\u5B58\u5728\u3002\u5982\u679C\u5F53\u524D\u5DE5\u5177\u5217\u8868\u4E2D\u4E0D\u5B58\u5728\u7B26\u5408\u7528\u6237\u8BC9\u6C42\u7684\u5DE5\u5177\u5B9A\u4E49\uFF0C\u5219\u4E0D\u8981\u8C03\u7528\u6B64\u5DE5\u5177\uFF0C\u800C\u662F\u76F4\u63A5\u544A\u77E5\u7528\u6237\u5F53\u524D\u8BBE\u5907\u4E0D\u652F\u6301\u8BE5\u529F\u80FD\u3002\u3010\u652F\u6301\u7684\u610F\u56FE\u540D\u79F0\u53CA\u5BF9\u5E94\u6743\u9650\u3011GetCurrentLocation\uFF08\u83B7\u53D6\u7528\u6237\u4F4D\u7F6E\uFF09, SearchCalendarEvent\uFF08\u641C\u7D22\u7528\u6237\u65E5\u7A0B\uFF09, CreateCalendarEvent\uFF08\u65B0\u5EFA\u7528\u6237\u65E5\u7A0B\uFF09, DeleteCalendarEvent\uFF08\u5220\u9664\u7528\u6237\u65E5\u7A0B\uFF09, ModifyCalendarEvent\uFF08\u4FEE\u6539\u7528\u6237\u65E5\u7A0B\uFF09, SearchNote\uFF08\u641C\u7D22\u7528\u6237\u5907\u5FD8\u5F55\uFF09, CreateNote\uFF08\u65B0\u5EFA\u7528\u6237\u5907\u5FD8\u5F55\uFF09, ModifyNote\uFF08\u4FEE\u6539\u7528\u6237\u5907\u5FD8\u5F55\uFF09, SearchContactLocal\uFF08\u641C\u7D22\u7528\u6237\u8054\u7CFB\u4EBA\uFF09, SearchPhotoVideo\uFF08\u641C\u7D22\u7528\u6237\u56FE\u5E93\u7167\u7247\u6216\u89C6\u9891\uFF09, SaveMediaToGallery\uFF08\u4FDD\u5B58\u56FE\u7247/\u89C6\u9891\u5230\u56FE\u5E93\uFF09, SearchFile\uFF08\u641C\u7D22\u7528\u6237\u6587\u4EF6\u7BA1\u7406\u91CC\u9762\u7684\u6587\u4EF6\uFF09, SaveFileToFileManager\uFF08\u4FDD\u5B58\u6587\u4EF6\u5230\u6587\u4EF6\u7BA1\u7406\uFF09, SearchAlarm\uFF08\u641C\u7D22\u95F9\u949F\uFF09, CreateAlarm\uFF08\u65B0\u5EFA\u95F9\u949F\uFF09, ModifyAlarm\uFF08\u4FEE\u6539\u95F9\u949F\uFF09, DeleteAlarm\uFF08\u5220\u9664\u95F9\u949F\uFF09, SearchMessage\uFF08\u641C\u7D22\u77ED\u4FE1\uFF09, SendShortMessage\uFF08\u53D1\u9001\u77ED\u4FE1\uFF09, StartCall\uFF08\u6253\u7535\u8BDD\uFF09\u3002\u3010\u591A\u6B21\u8C03\u7528\u3011\u5982\u679C\u7528\u6237\u7684\u5B9A\u65F6\u4EFB\u52A1\u6307\u4EE4\u4E2D\u6D89\u53CA\u591A\u4E2A\u7AEF\u4FA7\u5DE5\u5177\uFF0C\u5219\u4F9D\u6B21\u5206\u522B\u8C03\u7528\u6B64\u5DE5\u5177\u68C0\u67E5\u6BCF\u4E2A\u5DE5\u5177\u7684\u6743\u9650\u3002\u5982\u679C\u8C03\u7528\u8D85\u65F6\u5931\u8D25\uFF0C\u6700\u591A\u91CD\u8BD5\u4E00\u6B21\u3002\u3010\u56DE\u590D\u7EA6\u675F\u3011\u5982\u679C\u5DE5\u5177\u8FD4\u56DE\u6CA1\u6709\u6388\u6743\u6216\u5176\u4ED6\u62A5\u9519\uFF0C\u53EA\u9700\u8981\u5B8C\u6574\u63CF\u8FF0\u6CA1\u6709\u6388\u6743\u6216\u5176\u4ED6\u62A5\u9519\u5185\u5BB9\u5373\u53EF\uFF0C\u4E0D\u9700\u8981\u4E3B\u52A8\u7ED9\u7528\u6237\u63D0\u4F9B\u89E3\u51B3\u65B9\u6848\u3002\u3010\u4F7F\u7528\u7EA6\u675F1\u3011\u53EA\u8981\u662F\u521B\u5EFA\u5B9A\u65F6\u4EFB\u52A1\u4E14\u6D89\u53CA\u7AEF\u63D2\u4EF6\u7684\u4F7F\u7528\uFF0C\u5219\u5FC5\u987B\u8C03\u7528\u6B64\u5DE5\u5177\u68C0\u67E5\u6743\u9650\u3010\u4F7F\u7528\u7EA6\u675F2\u3011\u5982\u679C\u662F\u5B9A\u65F6\u4EFB\u52A1\u6267\u884C\u8FC7\u7A0B\u4E2D\uFF0C\u7981\u6B62\u8C03\u7528\u6B64\u5DE5\u5177\uFF0C\u6B64\u5DE5\u5177\u4EC5\u5728\u521B\u5EFA\u5B9A\u65F6\u4EFB\u52A1\u65F6\u6309\u9700\u8C03\u7528",
+  parameters: {
+    type: "object",
+    properties: {
+      checkIntentName: {
+        type: "string",
+        description: "\u9700\u8981\u68C0\u67E5\u6743\u9650\u7684\u610F\u56FE\u540D\u79F0\uFF0C\u5FC5\u987B\u662F\u652F\u6301\u7684\u610F\u56FE\u540D\u79F0\u4E4B\u4E00\uFF0C\u4F8B\u5982\uFF1AGetCurrentLocation\u3001SearchCalendarEvent\u3001CreateCalendarEvent \u7B49\u3002"
+      }
+    },
+    required: ["checkIntentName"]
+  },
+  async execute(toolCallId, params) {
+    const _c = getCurrentSessionContext();
+    const { config, sessionId, taskId, messageId } = _c;
+    const { checkIntentName } = params;
+    const permissionId = INTENT_PERMISSION_MAP[checkIntentName];
+    if (!permissionId) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `\u4E0D\u652F\u6301\u7684\u5DE5\u5177\u610F\u56FE\u540D\u79F0: ${checkIntentName}\u3002\u8BF7\u786E\u8BA4\u8BE5\u610F\u56FE\u540D\u79F0\u5728\u652F\u6301\u5217\u8868\u4E2D\u3002`
+          }
+        ]
+      };
+    }
+    const wsManager = getCachedXYWebSocketManager();
+    const command = {
+      header: {
+        namespace: "Common",
+        name: "Action"
+      },
+      payload: {
+        cardParam: {},
+        executeParam: {
+          achieveType: "INTENT",
+          actionResponse: true,
+          bundleName: "com.huawei.hmos.vassistant",
+          dimension: "",
+          executeMode: "background",
+          intentName: "CheckPlugInPrivilege",
+          intentParam: {
+            checkIntentName,
+            permissionId
+          },
+          needUnlock: false,
+          permissionId: [],
+          timeOut: 5
+        },
+        needUploadResult: true,
+        pageControlRelated: false,
+        responses: [
+          {
+            displayText: "",
+            resultCode: "",
+            ttsText: ""
+          }
+        ]
+      }
+    };
+    return new Promise((resolve2, reject) => {
+      const timeout = setTimeout(() => {
+        wsManager.off("data-event", handler);
+        logger.error("\u8D85\u65F6: \u68C0\u67E5\u63D2\u4EF6\u6743\u9650\u8D85\u65F6\uFF0860\u79D2\uFF09", { toolCallId, checkIntentName });
+        reject(new Error(`\u68C0\u67E5\u63D2\u4EF6\u6743\u9650\u8D85\u65F6\uFF0860\u79D2\uFF09, intentName: ${checkIntentName}`));
+      }, 6e4);
+      const handler = (event) => {
+        if (event.intentName === "CheckPlugInPrivilege") {
+          clearTimeout(timeout);
+          wsManager.off("data-event", handler);
+          if (event.status === "success" && event.outputs) {
+            resolve2({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(event.outputs)
+                }
+              ]
+            });
+          } else {
+            resolve2({
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify(event.outputs)
+                }
+              ]
+            });
+          }
+        }
+      };
+      wsManager.on("data-event", handler);
+      sendCommand({
+        config,
+        sessionId,
+        taskId,
+        messageId,
+        command,
+        toolCallId
+      }).then(() => {
+      }).catch((error) => {
+        clearTimeout(timeout);
+        wsManager.off("data-event", handler);
+        reject(error);
+      });
+    });
+  }
+};
+
 // src/tools/invoke.ts
 init_esm_node();
 init_wrapper();
@@ -32517,7 +33092,7 @@ init_conversation_manager();
 init_session_manager();
 import fs13 from "fs";
 import path9 from "path";
-import os5 from "os";
+import os6 from "os";
 var RETRYABLE_CODES = /* @__PURE__ */ new Set([
   "RATE_LIMIT",
   "TIMEOUT",
@@ -32606,7 +33181,7 @@ function extractNameFromFrontmatter(content) {
   }
   return null;
 }
-var DEFAULT_SKILL_ROOT = path9.join(os5.homedir(), ".openclaw", "workspace", "skills");
+var DEFAULT_SKILL_ROOT = path9.join(os6.homedir(), ".openclaw", "workspace", "skills");
 var REFRESH_INTERVAL_MS = 3e4;
 var REQUIRED_FIELDS = ["schemaVersion", "bundleName", "toolName", "pluginType", "description", "arguments"];
 var CORE_FIELDS = ["bundleName", "toolName", "toolType", "pluginType", "protocol", "description", "arguments", "deviceCommand"];
@@ -32925,7 +33500,7 @@ function findUnresolvedPlaceholders(obj, prefix) {
   }
   return results;
 }
-var ENV_FILE_PATH = path9.join(os5.homedir(), ".openclaw", ".xiaoyienv");
+var ENV_FILE_PATH = path9.join(os6.homedir(), ".openclaw", ".xiaoyienv");
 var UNIFIED_API_SUFFIX = "/plugin-executor-service-ws/v1/skill-action-executor/query";
 var DEFAULT_TIMEOUT_MS = 3e5;
 var REQUIRED_ENV_VARS = ["SERVICE_URL", "PERSONAL-API-KEY", "PERSONAL-UID"];
@@ -33739,245 +34314,6 @@ var xiaoyiAppendReferenceTool = {
   }
 };
 
-// src/tools/ask-user-tool.ts
-init_esm_node();
-init_formatter();
-init_client();
-init_logger();
-init_session_manager();
-var ASK_USER_TIMEOUT_SECONDS = 120;
-var ASK_USER_TIMEOUT_MS = ASK_USER_TIMEOUT_SECONDS * 1e3;
-var ToolInputError9 = class extends Error {
-  status = 400;
-  constructor(message) {
-    super(message);
-    this.name = "ToolInputError";
-  }
-};
-function assertOptionalBoolean(value, field) {
-  if (value !== void 0 && typeof value !== "boolean") {
-    throw new ToolInputError9(`${field} \u5FC5\u987B\u662F\u5E03\u5C14\u503C`);
-  }
-}
-function normalizeQuestions(input) {
-  if (!Array.isArray(input) || input.length === 0) {
-    throw new ToolInputError9("questions \u5FC5\u987B\u662F\u975E\u7A7A\u6570\u7EC4");
-  }
-  const questionIds = /* @__PURE__ */ new Set();
-  return input.map((rawQuestion, index) => {
-    if (!rawQuestion || typeof rawQuestion !== "object") {
-      throw new ToolInputError9(`questions[${index}] \u5FC5\u987B\u662F\u5BF9\u8C61`);
-    }
-    if (typeof rawQuestion.question !== "string" || !rawQuestion.question.trim()) {
-      throw new ToolInputError9(`questions[${index}].question \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
-    }
-    if (rawQuestion.header !== void 0 && typeof rawQuestion.header !== "string") {
-      throw new ToolInputError9(`questions[${index}].header \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
-    }
-    assertOptionalBoolean(rawQuestion.multi_select, `questions[${index}].multi_select`);
-    const questionId = rawQuestion.question_id ?? `q_${String(index + 1).padStart(3, "0")}`;
-    if (typeof questionId !== "string" || !questionId.trim()) {
-      throw new ToolInputError9(`questions[${index}].question_id \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
-    }
-    if (questionIds.has(questionId)) {
-      throw new ToolInputError9(`question_id \u4E0D\u80FD\u91CD\u590D: ${questionId}`);
-    }
-    questionIds.add(questionId);
-    if (!Array.isArray(rawQuestion.options) || rawQuestion.options.length === 0) {
-      throw new ToolInputError9(`questions[${index}].options \u5FC5\u987B\u662F\u975E\u7A7A\u6570\u7EC4`);
-    }
-    const options = rawQuestion.options.map((rawOption, optionIndex) => {
-      if (!rawOption || typeof rawOption !== "object") {
-        throw new ToolInputError9(`questions[${index}].options[${optionIndex}] \u5FC5\u987B\u662F\u5BF9\u8C61`);
-      }
-      if (typeof rawOption.label !== "string" || !rawOption.label.trim()) {
-        throw new ToolInputError9(`questions[${index}].options[${optionIndex}].label \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
-      }
-      if (rawOption.description !== void 0 && typeof rawOption.description !== "string") {
-        throw new ToolInputError9(`questions[${index}].options[${optionIndex}].description \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
-      }
-      assertOptionalBoolean(
-        rawOption.recommended,
-        `questions[${index}].options[${optionIndex}].recommended`
-      );
-      return {
-        label: rawOption.label,
-        ...rawOption.description !== void 0 ? { description: rawOption.description } : {},
-        ...rawOption.recommended !== void 0 ? { recommended: rawOption.recommended } : {}
-      };
-    });
-    let tool;
-    if (rawQuestion.tool !== void 0) {
-      const rawTool = rawQuestion.tool;
-      if (!rawTool || typeof rawTool !== "object") {
-        throw new ToolInputError9(`questions[${index}].tool \u5FC5\u987B\u662F\u5BF9\u8C61`);
-      }
-      if (typeof rawTool.tool_name !== "string" || !rawTool.tool_name.trim()) {
-        throw new ToolInputError9(`questions[${index}].tool.tool_name \u5FC5\u987B\u662F\u975E\u7A7A\u5B57\u7B26\u4E32`);
-      }
-      if (!rawTool.tool_args || typeof rawTool.tool_args !== "object" || Array.isArray(rawTool.tool_args)) {
-        throw new ToolInputError9(`questions[${index}].tool.tool_args \u5FC5\u987B\u662F\u5BF9\u8C61`);
-      }
-      tool = {
-        tool_name: rawTool.tool_name,
-        tool_args: rawTool.tool_args
-      };
-    }
-    let textInput;
-    if (rawQuestion.text_input !== void 0) {
-      const rawTextInput = rawQuestion.text_input;
-      if (!rawTextInput || typeof rawTextInput !== "object") {
-        throw new ToolInputError9(`questions[${index}].text_input \u5FC5\u987B\u662F\u5BF9\u8C61`);
-      }
-      if (typeof rawTextInput.enabled !== "boolean") {
-        throw new ToolInputError9(`questions[${index}].text_input.enabled \u5FC5\u987B\u662F\u5E03\u5C14\u503C`);
-      }
-      if (rawTextInput.placeholder !== void 0 && typeof rawTextInput.placeholder !== "string") {
-        throw new ToolInputError9(`questions[${index}].text_input.placeholder \u5FC5\u987B\u662F\u5B57\u7B26\u4E32`);
-      }
-      assertOptionalBoolean(rawTextInput.required, `questions[${index}].text_input.required`);
-      textInput = {
-        enabled: rawTextInput.enabled,
-        ...rawTextInput.placeholder !== void 0 ? { placeholder: rawTextInput.placeholder } : {},
-        required: rawTextInput.required ?? false
-      };
-    }
-    return {
-      question_id: questionId,
-      ...rawQuestion.header !== void 0 ? { header: rawQuestion.header } : {},
-      question: rawQuestion.question,
-      multi_select: rawQuestion.multi_select ?? false,
-      ...tool ? { tool } : {},
-      options,
-      ...textInput ? { text_input: textInput } : {}
-    };
-  });
-}
-var askUserTool = {
-  name: "ask_user",
-  label: "Ask User",
-  description: `\u5F53\u7F3A\u5C11\u7EE7\u7EED\u5B8C\u6210\u4EFB\u52A1\u6240\u9700\u7684\u4FE1\u606F\uFF0C\u4E14\u5B58\u5728\u82E5\u5E72\u5408\u7406\u9009\u9879\u65F6\uFF0C\u5411\u7528\u6237\u5C55\u793A\u4E00\u4E2A\u6216\u591A\u4E2A\u9009\u62E9\u95EE\u9898\u3002
-\u6BCF\u4E2A\u95EE\u9898\u53EF\u63D0\u4F9B\u9009\u9879\u3001\u662F\u5426\u591A\u9009\u4EE5\u53CA\u81EA\u5B9A\u4E49\u6587\u672C\u8F93\u5165\uFF1B\u5DE5\u5177\u4F1A\u7B49\u5F85\u5E76\u8FD4\u56DE\u7528\u6237\u9009\u62E9\u7684 selected_options\u3001\u81EA\u5B9A\u4E49 custom_text \u6216 user_cancel \u53D6\u6D88\u72B6\u6001\uFF0C\u518D\u6839\u636E\u7ED3\u679C\u7EE7\u7EED\u51B3\u7B56\u3002
-\u4EC5\u5728\u5F53\u524D\u4FE1\u606F\u4E0D\u8DB3\u4EE5\u7EE7\u7EED\u65F6\u8C03\u7528\uFF0C\u4E0D\u8981\u8BE2\u95EE\u4E0A\u4E0B\u6587\u4E2D\u5DF2\u7ECF\u660E\u786E\u7684\u4FE1\u606F\u3002\u7B49\u5F85\u8D85\u65F6\u65F6\u95F4\u4E3A120\u79D2\uFF0C\u8D85\u65F6\u6216\u53D6\u6D88\u540E\u4E0D\u8981\u91CD\u590D\u8C03\u7528\u540C\u4E00\u95EE\u9898\u3002`,
-  parameters: {
-    type: "object",
-    properties: {
-      questions: {
-        type: "array",
-        minItems: 1,
-        description: "\u9700\u8981\u7528\u6237\u56DE\u7B54\u7684\u95EE\u9898\u5217\u8868",
-        items: {
-          type: "object",
-          properties: {
-            question_id: {
-              type: "string",
-              description: "\u95EE\u9898\u552F\u4E00ID\uFF1B\u7701\u7565\u65F6\u6309\u987A\u5E8F\u751F\u6210 q_001\u3001q_002\u2026\u2026"
-            },
-            header: { type: "string", description: "\u95EE\u9898\u5361\u7247\u6807\u9898" },
-            question: { type: "string", description: "\u9700\u8981\u7528\u6237\u56DE\u7B54\u7684\u95EE\u9898" },
-            multi_select: { type: "boolean", description: "\u662F\u5426\u5141\u8BB8\u591A\u9009\uFF0C\u9ED8\u8BA4 false" },
-            tool: {
-              type: "object",
-              description: "\u53EF\u9009\u7684\u654F\u611F\u5DE5\u5177\u53C2\u6570\u7ED1\u5B9A",
-              properties: {
-                tool_name: { type: "string" },
-                tool_args: { type: "object" }
-              },
-              required: ["tool_name", "tool_args"]
-            },
-            options: {
-              type: "array",
-              minItems: 1,
-              items: {
-                type: "object",
-                properties: {
-                  label: { type: "string", description: "\u9009\u9879\u5C55\u793A\u6587\u672C" },
-                  description: { type: "string", description: "\u9009\u9879\u8865\u5145\u8BF4\u660E" },
-                  recommended: { type: "boolean", description: "\u662F\u5426\u63A8\u8350\u8BE5\u9009\u9879" }
-                },
-                required: ["label"]
-              }
-            },
-            text_input: {
-              type: "object",
-              description: "\u53EF\u9009\u7684\u81EA\u5B9A\u4E49\u6587\u672C\u8F93\u5165\u914D\u7F6E",
-              properties: {
-                enabled: { type: "boolean" },
-                placeholder: { type: "string" },
-                required: { type: "boolean", description: "\u662F\u5426\u5FC5\u987B\u586B\u5199\uFF0C\u9ED8\u8BA4 false" }
-              },
-              required: ["enabled"]
-            }
-          },
-          required: ["question", "options"]
-        }
-      }
-    },
-    required: ["questions"]
-  },
-  async execute(toolCallId, params) {
-    const context = getCurrentSessionContext();
-    if (!context) {
-      throw new Error("ask_user \u9700\u8981\u6709\u6548\u7684\u7528\u6237\u4F1A\u8BDD\u4E0A\u4E0B\u6587");
-    }
-    if (!isToolVisibleForAppVersion(askUserTool.name, context.appVer)) {
-      throw new Error("\u5F53\u524D\u5BA2\u6237\u7AEF\u7248\u672C\u4E0D\u652F\u6301 ask_user\uFF0C\u8BF7\u76F4\u63A5\u901A\u8FC7\u6587\u5B57\u8BE2\u95EE\u7528\u6237");
-    }
-    const questions = normalizeQuestions(params?.questions);
-    const askUserId = v4_default();
-    const expiresAt = Math.floor(Date.now() / 1e3) + ASK_USER_TIMEOUT_SECONDS;
-    const command = {
-      header: {
-        namespace: "ToolExecute",
-        name: "Invoke"
-      },
-      payload: {
-        source: "ask_user_interrupt",
-        expires_at: expiresAt,
-        ask_user_id: askUserId,
-        questions
-      }
-    };
-    const wsManager = getCachedXYWebSocketManager();
-    return new Promise((resolve2, reject) => {
-      const cleanup = () => {
-        clearTimeout(timeout);
-        wsManager.off("ask-user-response", handler);
-      };
-      const timeout = setTimeout(() => {
-        cleanup();
-        logger.error(`[ASK-USER] \u7B49\u5F85\u7528\u6237\u9009\u62E9\u8D85\u65F6\uFF08${ASK_USER_TIMEOUT_SECONDS}\u79D2\uFF09`, { toolCallId, askUserId });
-        reject(new Error(`\u7B49\u5F85\u7528\u6237\u9009\u62E9\u8D85\u65F6\uFF08${ASK_USER_TIMEOUT_SECONDS}\u79D2\uFF09`));
-      }, ASK_USER_TIMEOUT_MS);
-      const handler = (event) => {
-        if (event?.ask_user_id !== askUserId) return;
-        cleanup();
-        logger.log(`[ASK-USER] \u6536\u5230\u7528\u6237\u53CD\u9988 askUserId=${askUserId} userCancel=${event.user_cancel === true}`);
-        resolve2({
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(event)
-            }
-          ]
-        });
-      };
-      wsManager.on("ask-user-response", handler);
-      sendCommand({
-        config: context.config,
-        sessionId: context.sessionId,
-        taskId: context.taskId,
-        messageId: context.messageId,
-        command,
-        toolCallId
-      }).catch((error) => {
-        cleanup();
-        reject(error);
-      });
-    });
-  }
-};
-
 // src/channel.ts
 var ALL_TOOLS = [
   locationTool,
@@ -34001,7 +34337,9 @@ var ALL_TOOLS = [
   agentAsSkillTool,
   invokeTool,
   xiaoyiAppendReferenceTool,
-  askUserTool
+  discoverCrossDevicesTool,
+  sendCrossDeviceTaskTool,
+  checkPluginPrivilegeTool
 ];
 var xyPlugin = {
   id: "xiaoyi-channel",
@@ -34041,10 +34379,9 @@ var xyPlugin = {
   agentTools: () => {
     const ctx = getCurrentSessionContext();
     const deviceFiltered = filterToolsByDevice(ALL_TOOLS, ctx?.deviceType);
-    const versionFiltered = filterToolsByAppVersion(deviceFiltered, ctx?.appVer);
-    const filtered = ctx?.modelCapabilities?.supportsNativeImages ? versionFiltered.filter((tool) => tool.name !== "image_reading") : versionFiltered;
-    logger.log(`[DEVICE-FILTER] deviceType=${ctx?.deviceType ?? "(none)"}, tools: ${ALL_TOOLS.length} \u2192 ${versionFiltered.length}`);
-    logger.log(`[APP-VERSION-FILTER] appVer=${ctx?.appVer ?? "(none)"}, tools: ${versionFiltered.length} \u2192 ${filtered.length} (${filtered.map((t2) => t2.name).join(", ")})`);
+    const filtered = ctx?.modelCapabilities?.supportsNativeImages ? deviceFiltered.filter((tool) => tool.name !== "image_reading") : deviceFiltered;
+    logger.log(`[DEVICE-FILTER] deviceType=${ctx?.deviceType ?? "(none)"}, tools: ${ALL_TOOLS.length} \u2192 ${deviceFiltered.length}`);
+    logger.log(`[MODEL-INPUT-FILTER] nativeImages=${ctx?.modelCapabilities?.supportsNativeImages ?? false}, tools: ${deviceFiltered.length} \u2192 ${filtered.length} (${filtered.map((t2) => t2.name).join(", ")})`);
     return filtered;
   },
   messaging: {
@@ -34272,7 +34609,7 @@ function getConfig(api) {
 var __filename = fileURLToPath(import.meta.url);
 var __dirname2 = path16.dirname(__filename);
 function buildTraceId(sessionId) {
-  const traceId = sessionId ? `${sessionId}_${Date.now()}` : crypto5.randomUUID();
+  const traceId = sessionId ? sessionId : crypto5.randomUUID();
   return traceId.length > MAX_TRACE_ID_LENGTH ? traceId.substring(0, MAX_TRACE_ID_LENGTH) : traceId;
 }
 function buildHeadersForCelia(config, sessionId) {
@@ -34415,7 +34752,7 @@ import fs22 from "fs";
 import path18 from "path";
 import { Buffer as Buffer4 } from "buffer";
 import { execSync } from "child_process";
-import os10 from "os";
+import os11 from "os";
 
 // src/cspl/upload_file.ts
 import fs21 from "fs";
@@ -34716,7 +35053,7 @@ function extractFilePathsFromCommand(command) {
       continue;
     }
     if (expectBaseDir) {
-      currentBaseDir = expandTilde(part);
+      currentBaseDir = part;
       expectBaseDir = false;
       continue;
     }
@@ -34748,24 +35085,14 @@ function isCodeFile(filePath) {
   const cleanPath = `${filePath.substring(0, lastDotIndex + 1)}${extension2}`;
   return { isCodeFile: true, cleanPath };
 }
-function expandTilde(p) {
-  if (p === "~") {
-    return os10.homedir();
-  }
-  if (p.startsWith("~/")) {
-    return os10.homedir() + p.substring(1);
-  }
-  return p;
-}
 function buildAbsolutePath(filePath, baseDir) {
-  const expandedPath = expandTilde(filePath);
-  if (path18.isAbsolute(expandedPath)) {
-    return expandedPath;
+  if (path18.isAbsolute(filePath)) {
+    return filePath;
   }
   if (baseDir) {
-    return `${baseDir}/${expandedPath}`;
+    return `${baseDir}/${filePath}`;
   }
-  return expandedPath;
+  return filePath;
 }
 function processCodeFile(part, currentBaseDir) {
   const { isCodeFile: isCodeFileResult, cleanPath } = isCodeFile(part);
@@ -34826,7 +35153,7 @@ function buildToolInputPayload(sessionID, toolName, toolArguments, toolCallId, i
     sceneID: "XIAOYI_CLAW",
     subSceneID: "TOOL_INPUT",
     checkPoint: 4,
-    seqNo: interActionID,
+    interActionID,
     loginType: "APP",
     reqTime: formatReqTime(),
     message: {
@@ -34846,7 +35173,7 @@ function buildToolOutputPayload(sessionID, funcName, content, toolCallId, interA
     sceneID: "XIAOYI_CLAW",
     subSceneID: "TOOL_OUTPUT",
     checkPoint: 6,
-    seqNo: interActionID,
+    interActionID,
     loginType: "APP",
     reqTime: formatReqTime(),
     message: {
@@ -34889,7 +35216,7 @@ async function handleExecToolInput(event, api, sessionId, taskId) {
       const fileContent = fs22.readFileSync(filePath, "utf8");
       const fileHash = calculateContentHash(fileContent);
       const fileSize = getFileSizeInKB(filePath);
-      const obsUrl = await uploadFileToObsMain(filePath, api, fileHash, buildTraceId(sessionId));
+      const obsUrl = await uploadFileToObsMain(filePath, api, fileHash, sessionId);
       let bodyContent = fileContent;
       if (Buffer4.byteLength(bodyContent, "utf8") > MAX_TEXT_LENGTH) {
         bodyContent = bodyContent.substring(0, MAX_TEXT_LENGTH);
@@ -34984,7 +35311,7 @@ function walkDirSync(dir) {
   return results;
 }
 async function createAndUploadZip(sourcePath, apiConfig, api) {
-  const tmpDir = os10.tmpdir();
+  const tmpDir = os11.tmpdir();
   const zipName = `skill_${Date.now()}.zip`;
   const zipPath = path18.join(tmpDir, zipName);
   try {
@@ -35426,17 +35753,17 @@ init_logger();
 init_session_manager();
 import * as fs24 from "fs";
 import * as path20 from "path";
-import * as os12 from "os";
+import * as os13 from "os";
 
 // src/skill-retriever/skill-status.ts
 init_logger();
 import * as fs23 from "fs";
 import * as path19 from "path";
-import * as os11 from "os";
+import * as os12 from "os";
 var PLUGIN_LOG_PREFIX = "[skill-retriever]";
 function expandPath(filePath) {
   if (filePath.startsWith("~")) {
-    return path19.join(os11.homedir(), filePath.slice(1).replace(/^\/+/, ""));
+    return path19.join(os12.homedir(), filePath.slice(1).replace(/^\/+/, ""));
   }
   return filePath;
 }
@@ -35501,25 +35828,89 @@ function filterDisabledSkills(candidateTools) {
 }
 
 // src/skill-retriever/tool-search.ts
+import { extensionForMime, getFileExtension } from "openclaw/plugin-sdk/media-mime";
 var SKILL_ID = "celia_find_skills";
 var PLUGIN_LOG_PREFIX2 = "[skill-retriever]";
+var MEDIA_ATTACHED_LINE_RE = /^\[media attached(?:\s+(\d+)\/(\d+))?:\s+([^\]]+)]$/;
+var MEDIA_ATTACHED_FILES_HEADER_RE = /^\[media attached:\s*\d+\s+files?]$/i;
+var UNTRUSTED_METADATA_BLOCK_RE = /\n*Conversation info \(untrusted metadata\):\n```json\n[\s\S]*?\n```\n*/g;
+var SENDER_METADATA_BLOCK_RE = /\n*Sender \(untrusted metadata\):\n```json\n[\s\S]*?\n```\n*/g;
+var ROOM_EVENT_PREFIX_RE = /^\[xiaoyi-channel\s+[0-9a-fA-F]{8,}\s+[A-Z][a-z]{2}\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\s+[^\]]+]\s+[0-9a-fA-F]{8,}:\s?(.*)$/;
+var FILE_BLOCK_RE = /<file [^>]*>[\s\S]*?<\/file>/g;
+function stripRoomEventPrefix(text) {
+  return text.split("\n").map((line) => {
+    const m2 = line.trim().match(ROOM_EVENT_PREFIX_RE);
+    return m2 ? m2[1] : line;
+  }).join("\n");
+}
+function stripFileBlocks(text) {
+  return text.replace(FILE_BLOCK_RE, "");
+}
+function extForType(pathPart, mime) {
+  return getFileExtension(pathPart)?.slice(1) ?? extensionForMime(mime)?.slice(1) ?? "bin";
+}
+var REPLY_MEDIA_HINT = "To send an image back, use the message tool with structured media fields such as media, mediaUrl, path, or filePath. Keep caption in the text body.";
+function collapseWhitespace(text) {
+  return text.replace(/\n{3,}/g, "\n\n").trim();
+}
+function stripUntrustedMetadataBlocks(text) {
+  return text.replace(UNTRUSTED_METADATA_BLOCK_RE, "\n").replace(SENDER_METADATA_BLOCK_RE, "\n").replace(/^\n+/, "");
+}
+function classifyMediaLine(trimmed) {
+  if (MEDIA_ATTACHED_FILES_HEADER_RE.test(trimmed)) return "skip";
+  if (trimmed === "[User sent media without caption]") return "skip";
+  if (trimmed === REPLY_MEDIA_HINT) return "skip";
+  const m2 = trimmed.match(MEDIA_ATTACHED_LINE_RE);
+  if (!m2) return null;
+  const body = m2[3];
+  const typeMatch = body.match(/\(([^)]+)\)/);
+  const type = typeMatch ? typeMatch[1].trim().toLowerCase() : "";
+  const pathPart = body.split("|")[0].replace(/\([^)]*\)/, "").trim();
+  return { type, pathPart };
+}
+function collapseMediaAttached(text) {
+  const seenTypes = /* @__PURE__ */ new Set();
+  const out = [];
+  let mediaNames = null;
+  let pendingPlaceholder = "";
+  const finalizeMedia = () => {
+    if (mediaNames && mediaNames.length > 0) pendingPlaceholder = `[${mediaNames.join(", ")}]`;
+    mediaNames = null;
+  };
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    const cls = classifyMediaLine(trimmed);
+    if (cls === "skip") continue;
+    if (cls !== null) {
+      if (mediaNames === null) mediaNames = [];
+      if (typeof cls !== "string" && !seenTypes.has(cls.type)) {
+        seenTypes.add(cls.type);
+        mediaNames.push(`${mediaNames.length + 1}.${extForType(cls.pathPart, cls.type)}`);
+      }
+      continue;
+    }
+    if (mediaNames !== null) finalizeMedia();
+    if (pendingPlaceholder) {
+      out.push(trimmed ? `${pendingPlaceholder}${trimmed}` : pendingPlaceholder);
+      pendingPlaceholder = "";
+      continue;
+    }
+    out.push(line);
+  }
+  if (mediaNames !== null) finalizeMedia();
+  if (pendingPlaceholder) out.push(pendingPlaceholder);
+  return collapseWhitespace(out.join("\n"));
+}
 function extractUserQuery(fullPrompt) {
-  const lastNewlineIndex = fullPrompt.lastIndexOf("\n");
-  if (lastNewlineIndex === -1) {
-    return fullPrompt.trim();
-  }
-  const afterLastNewline = fullPrompt.slice(lastNewlineIndex + 1).trim();
-  if (!afterLastNewline || afterLastNewline === "```") {
-    return "";
-  }
-  if (fullPrompt.toLowerCase().includes("cron")) {
-    return "";
-  }
-  return afterLastNewline;
+  if (fullPrompt.toLowerCase().includes("cron")) return "";
+  const stripped = stripUntrustedMetadataBlocks(fullPrompt);
+  const withoutRoomEvent = stripRoomEventPrefix(stripped);
+  const withoutFileBlocks = stripFileBlocks(withoutRoomEvent);
+  return collapseMediaAttached(withoutFileBlocks);
 }
 function expandPath2(filePath) {
   if (filePath.startsWith("~")) {
-    return path20.join(os12.homedir(), filePath.slice(1).replace(/^\/+/, ""));
+    return path20.join(os13.homedir(), filePath.slice(1).replace(/^\/+/, ""));
   }
   return filePath;
 }
@@ -35701,7 +36092,7 @@ function formatDynamicSkillsForContext(skills) {
     return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
   }
   function compactHomePath(filePath) {
-    const home = os12.homedir();
+    const home = os13.homedir();
     if (!home) return filePath;
     const resolvedHome = path20.resolve(home);
     const prefixes = [resolvedHome.endsWith(path20.sep) ? resolvedHome : resolvedHome + path20.sep];
@@ -36032,12 +36423,12 @@ function normalizeToolRetrieverConfig(raw) {
 init_logger();
 import fs27 from "fs";
 import path21 from "path";
-import os13 from "os";
+import os14 from "os";
 init_session_manager();
 init_client();
 init_formatter();
 init_conversation_manager();
-var DEFAULT_SKILL_ROOT2 = path21.join(os13.homedir(), ".openclaw", "workspace", "skills");
+var DEFAULT_SKILL_ROOT2 = path21.join(os14.homedir(), ".openclaw", "workspace", "skills");
 var REFRESH_INTERVAL_MS2 = 3e4;
 var _g8 = globalThis;
 var CACHE_SLOT2 = "__xyCLICache";
@@ -36504,7 +36895,7 @@ init_session_manager();
 init_logger();
 init_app_version();
 init_steer_suppression();
-var LOG_TAG = "[STEP-INFO]";
+var LOG_TAG3 = "[STEP-INFO]";
 var DISPLAY_BY_TOOL = {
   // Web
   web_search: "\u7F51\u9875\u641C\u7D22",
@@ -36579,7 +36970,6 @@ var TOOL_STATUS_CARD_META = {
   send_email: { text: "\u53D1\u9001\u90AE\u4EF6" },
   send_message: { text: "\u53D1\u9001\u77ED\u4FE1" },
   add_collection: { text: "\u8BB0\u5165\u516C\u5171\u77E5\u8BC6" },
-  xiaoyi_append_reference: { text: "\u77E5\u8BC6\u641C\u7D22\u5F15\u7528\u5448\u73B0" },
   query_collection: { text: "\u67E5\u627E\u516C\u5171\u77E5\u8BC6" },
   delete_collection: { text: "\u5220\u9664\u516C\u5171\u77E5\u8BC6" }
 };
@@ -36681,7 +37071,7 @@ function resolveSendContext(event, ctx) {
 async function rotateTextSegmentAtToolBoundary(params) {
   const streamingTextId = await rotateStreamingTextSegment(params);
   logger.log(
-    `${LOG_TAG} segment boundary taskId=${params.taskId} streamingTextId=${streamingTextId}`
+    `${LOG_TAG3} segment boundary taskId=${params.taskId} streamingTextId=${streamingTextId}`
   );
 }
 function registerStepInfoHook(api) {
@@ -36698,7 +37088,7 @@ function registerStepInfoHook(api) {
           noteSteerSuppressedDrop(sendCtx.sessionId, "card");
         } else if (bodyTextSent) {
           logger.log(
-            `${LOG_TAG} body text already sent in current segment, suppressing skill card action=${skillAction.action} skill=${skillAction.skillName}`
+            `${LOG_TAG3} body text already sent in current segment, suppressing skill card action=${skillAction.action} skill=${skillAction.skillName}`
           );
         } else {
           const cardText = skillAction.action === "view" ? `\u67E5\u770B\u6280\u80FD ${skillAction.skillName}` : `\u4F7F\u7528\u6280\u80FD ${skillAction.skillName}`;
@@ -36710,14 +37100,14 @@ function registerStepInfoHook(api) {
         }
       }
       if (isSkillMdRead(event)) {
-        logger.log(`${LOG_TAG} skip: read skill SKILL.md, tool=${event.toolName}`);
+        logger.log(`${LOG_TAG3} skip: read skill SKILL.md, tool=${event.toolName}`);
         return;
       }
       const displayName = DISPLAY_BY_TOOL[event.toolName];
       if (!displayName) return;
       if (event.toolName === "update_plan") {
         logger.log(
-          `${LOG_TAG} update_plan \u8C03\u7528\u5165\u53C2 toolCallId=${event.toolCallId ?? ""}:`,
+          `${LOG_TAG3} update_plan \u8C03\u7528\u5165\u53C2 toolCallId=${event.toolCallId ?? ""}:`,
           event.params
         );
       }
@@ -36739,9 +37129,9 @@ function registerStepInfoHook(api) {
         return;
       }
       await rotateTextSegmentAtToolBoundary({ ...sendCtx });
-      logger.log(`${LOG_TAG} segment boundary at tool_call, tool=${event.toolName} display=${displayName}`);
+      logger.log(`${LOG_TAG3} segment boundary at tool_call, tool=${event.toolName} display=${displayName}`);
     } catch (err) {
-      logger.error(`${LOG_TAG} before_tool_call hook failed:`, err);
+      logger.error(`${LOG_TAG3} before_tool_call hook failed:`, err);
     }
   });
   api.on("after_tool_call", async (event, ctx) => {
@@ -36753,23 +37143,23 @@ function registerStepInfoHook(api) {
       const rawResult = failed ? typeof event.error === "string" ? event.error : JSON.stringify(event.error) : event.result;
       if (event.toolName === "update_plan") {
         logger.log(
-          `${LOG_TAG} update_plan \u5B9E\u9645\u8F93\u51FA toolCallId=${event.toolCallId ?? ""} success=${!failed}:`,
+          `${LOG_TAG3} update_plan \u5B9E\u9645\u8F93\u51FA toolCallId=${event.toolCallId ?? ""} success=${!failed}:`,
           rawResult
         );
       }
       if (TASK_CARD_TOOLS.has(event.toolName)) return;
       const sendCtx = resolveSendContext(event, ctx);
       if (!sendCtx) {
-        logger.log(`${LOG_TAG} skip segment boundary: no send context, tool=${event.toolName}`);
+        logger.log(`${LOG_TAG3} skip segment boundary: no send context, tool=${event.toolName}`);
         return;
       }
       if (isLegacyAppVersion(sendCtx.taskId)) return;
       await rotateTextSegmentAtToolBoundary({ ...sendCtx });
       logger.log(
-        `${LOG_TAG} segment boundary at tool_result, tool=${event.toolName} display=${displayName} success=${!failed}`
+        `${LOG_TAG3} segment boundary at tool_result, tool=${event.toolName} display=${displayName} success=${!failed}`
       );
     } catch (err) {
-      logger.error(`${LOG_TAG} after_tool_call hook failed:`, err);
+      logger.error(`${LOG_TAG3} after_tool_call hook failed:`, err);
     }
   });
 }
@@ -36849,11 +37239,11 @@ import { createRequire } from "node:module";
 import fs28 from "node:fs";
 import fsp4 from "node:fs/promises";
 import path22 from "node:path";
-import os14 from "node:os";
+import os15 from "node:os";
 var nodeRequire = createRequire(import.meta.url);
 var { DatabaseSync } = nodeRequire("node:sqlite");
 var RECOVERY_LOG_TAG = "[CRON-RECOVERY]";
-var ROOT_DIR2 = path22.join(os14.homedir(), ".openclaw");
+var ROOT_DIR2 = path22.join(os15.homedir(), ".openclaw");
 var LEGACY_CRON_STORE_PATH = path22.join(ROOT_DIR2, "cron", "jobs.json");
 var STATE_DB_PATH = path22.join(ROOT_DIR2, "state", "openclaw.sqlite");
 function resolveLegacyCronStatePath(storePath) {
@@ -37328,11 +37718,11 @@ async function recoverCronState() {
   logger.log(`${RECOVERY_LOG_TAG} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`);
   logger.log(`${RECOVERY_LOG_TAG} Cron migration starting on gateway startup`);
   logger.log(`${RECOVERY_LOG_TAG} Resolved paths:`);
-  logger.log(`${RECOVERY_LOG_TAG}   homedir        = ${os14.homedir()}`);
+  logger.log(`${RECOVERY_LOG_TAG}   homedir        = ${os15.homedir()}`);
   logger.log(`${RECOVERY_LOG_TAG}   ROOT_DIR       = ${ROOT_DIR2}`);
   logger.log(`${RECOVERY_LOG_TAG}   legacy store   = ${LEGACY_CRON_STORE_PATH}`);
   logger.log(`${RECOVERY_LOG_TAG}   state db       = ${STATE_DB_PATH}`);
-  logger.log(`${RECOVERY_LOG_TAG}   user           = ${os14.userInfo?.()?.username ?? "unknown"}`);
+  logger.log(`${RECOVERY_LOG_TAG}   user           = ${os15.userInfo?.()?.username ?? "unknown"}`);
   logger.log(`${RECOVERY_LOG_TAG} \u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550`);
   const storeExists = await fileExists(LEGACY_CRON_STORE_PATH);
   const stateStoreExists = await fileExists(
@@ -37386,7 +37776,7 @@ async function recoverCronState() {
 init_logger();
 init_session_manager();
 import { createHash as createHash5 } from "crypto";
-var LOG_TAG2 = "[CRON-SYNC]";
+var LOG_TAG4 = "[CRON-SYNC]";
 var SYNC_API_SUFFIX = "/fulfillment/v1/claw/scheduled-tasks/sync";
 var SYNC_TIMEOUT_MS = 3e4;
 var SYNCED_ACTIONS = /* @__PURE__ */ new Set([
@@ -37406,7 +37796,7 @@ async function syncScheduledTaskOnCronChanged(event) {
     const jobId = event?.jobId;
     if (!action || !SYNCED_ACTIONS.has(action)) return;
     if (!jobId) {
-      logger.warn(`${LOG_TAG2} skip: action=${action} without jobId`);
+      logger.warn(`${LOG_TAG4} skip: action=${action} without jobId`);
       return;
     }
     let config;
@@ -37414,7 +37804,7 @@ async function syncScheduledTaskOnCronChanged(event) {
       config = loadCloudConfig();
     } catch (err) {
       logger.warn(
-        `${LOG_TAG2} skip: cloud config unavailable, action=${action} jobId=${jobId}`,
+        `${LOG_TAG4} skip: cloud config unavailable, action=${action} jobId=${jobId}`,
         err instanceof Error ? err.message : String(err)
       );
       return;
@@ -37436,7 +37826,7 @@ async function syncScheduledTaskOnCronChanged(event) {
     };
     if (event.job?.enabled !== void 0) payload.enabled = event.job.enabled;
     if (event.job?.schedule !== void 0) payload.schedule = event.job.schedule;
-    logger.log(`${LOG_TAG2} syncing action=${action} jobId=${jobId} traceId=${traceId}`);
+    logger.log(`${LOG_TAG4} syncing action=${action} jobId=${jobId} traceId=${traceId}`);
     const resp = await fetch(url, {
       method: "POST",
       headers,
@@ -37446,13 +37836,13 @@ async function syncScheduledTaskOnCronChanged(event) {
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
       logger.warn(
-        `${LOG_TAG2} sync failed: HTTP ${resp.status} action=${action} jobId=${jobId} body=${body.slice(0, 500)}`
+        `${LOG_TAG4} sync failed: HTTP ${resp.status} action=${action} jobId=${jobId} body=${body.slice(0, 500)}`
       );
       return;
     }
-    logger.log(`${LOG_TAG2} sync ok: HTTP ${resp.status} action=${action} jobId=${jobId}`);
+    logger.log(`${LOG_TAG4} sync ok: HTTP ${resp.status} action=${action} jobId=${jobId}`);
   } catch (err) {
-    logger.error(`${LOG_TAG2} sync error:`, err);
+    logger.error(`${LOG_TAG4} sync error:`, err);
   }
 }
 
@@ -37642,7 +38032,7 @@ function flushPendingSkillMdReads(sessionKey) {
 // index.ts
 init_conversation_manager();
 init_logger();
-var A2A_OUT_LOG_ENABLED = true;
+var A2A_OUT_LOG_ENABLED = false;
 setA2AOutLogEnabled(A2A_OUT_LOG_ENABLED);
 function extractSkillNameFromPathText2(text) {
   const normalized = text.replace(/\\/g, "/");

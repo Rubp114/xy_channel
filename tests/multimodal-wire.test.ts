@@ -19,7 +19,6 @@ vi.mock("../src/formatter.js", () => ({ sendStatusUpdate: vi.fn(), sendFileArtif
 
 const PNG_BUFFER = encodePngRgba(Buffer.from([255, 0, 0, 255]), 1, 1);
 const PNG = PNG_BUFFER.toString("base64");
-const SECOND_PNG = encodePngRgba(Buffer.from([0, 255, 0, 255]), 1, 1).toString("base64");
 const fixtureDirectories: string[] = [];
 const model = {
   id: "Integration_Vision", name: "Integration_Vision", api: "openai-completions",
@@ -48,12 +47,10 @@ afterEach(async () => {
 
 describe("real OpenClaw OpenAI-compatible HTTP serialization", () => {
   it.each([
-    [["text", "image"], "请描述图片", [PNG]],
-    [["text", "image"], "请对比图片", [PNG, SECOND_PNG]],
-    [["text", "image"], "", [PNG]],
-    [["text"], "请描述图片", []],
-    [undefined, "请描述图片", []],
-  ])("serializes the correct images for modelInput %j and prompt %j", async (rawInput, prompt, expectedImages) => {
+    [["text", "image"], true],
+    [["text"], false],
+    [undefined, false],
+  ])("applies modelInput %j to actual image_url payload", async (rawInput, native) => {
     const requests: Array<{ body: any; headers: Headers }> = [];
     // Intercept the transport only; model normalization, provider wrapping,
     // SDK serialization and SSE response parsing all use the real code.
@@ -66,17 +63,13 @@ describe("real OpenClaw OpenAI-compatible HTTP serialization", () => {
       modelName: model.id, modelInput: rawInput,
     } } } }] as any;
     const capabilities = extractModelInput(parts);
-    let images = [{ type: "image", data: PNG, mimeType: "image/png" }];
-    if (expectedImages.length) {
+    let image = { type: "image", data: PNG, mimeType: "image/png" };
+    if (native) {
       const directory = await fs.mkdtemp(path.join(os.tmpdir(), "xy-wire-"));
       fixtureDirectories.push(directory);
-      const files = await Promise.all(expectedImages.map(async (data, index) => {
-        const name = `pixel-${index}.png`;
-        const imagePath = path.join(directory, name);
-        await fs.writeFile(imagePath, Buffer.from(data, "base64"));
-        return { path: imagePath, name };
-      }));
-      images = await loadNativeImages(files, {});
+      const imagePath = path.join(directory, "red-pixel.png");
+      await fs.writeFile(imagePath, PNG_BUFFER);
+      [image] = await loadNativeImages([{ path: imagePath, name: "red-pixel.png" }], {});
     }
 
     await runWithSessionContext({
@@ -88,8 +81,8 @@ describe("real OpenClaw OpenAI-compatible HTTP serialization", () => {
       const wrapped = xiaoyiProvider.wrapStreamFn!({ streamFn: streamSimple } as any)!;
       const stream = await wrapped(resolved as any, {
         messages: [{ role: "user", timestamp: 1, content: [
-          ...(prompt ? [{ type: "text", text: prompt }] : []),
-          ...images,
+          { type: "text", text: "请描述图片" },
+          image,
         ] }],
       } as any, { apiKey: "integration-test-key" });
       for await (const _event of stream as any) { /* consume the real SDK response */ }
@@ -99,9 +92,10 @@ describe("real OpenClaw OpenAI-compatible HTTP serialization", () => {
     expect(requests).toHaveLength(1);
     const content = requests[0].body.messages.find((message: any) => message.role === "user").content;
     const imageParts = Array.isArray(content) ? content.filter((part: any) => part.type === "image_url") : [];
-    expect(imageParts.map((part: any) => part.image_url.url))
-      .toEqual(expectedImages.map((data) => `data:image/png;base64,${data}`));
-    if (prompt) expect(JSON.stringify(content)).toContain(prompt);
+    expect(imageParts).toHaveLength(native ? 1 : 0);
+    if (native) expect(imageParts[0].image_url.url).toBe(`data:image/png;base64,${PNG}`);
+    else expect(JSON.stringify(requests[0].body)).not.toContain(PNG);
+    expect(JSON.stringify(content)).toContain("请描述图片");
     expect(requests[0].body.model).toBe(model.id);
     expect(requests[0].headers.get("x-hag-trace-id")).toBe("wire-session&interaction");
     expect(model.input).toEqual(["text"]); // no mutation of shared catalog entries

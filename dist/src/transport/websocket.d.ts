@@ -31,7 +31,6 @@ export interface ManagerDiagnostics {
  * Events:
  * - 'message': (message: A2AJsonRpcRequest, sessionId: string) => void
  * - 'data-event': (event: A2ADataEvent) => void
- * - 'ask-user-response': (event: AskUserResponse) => void
  * - 'gui-agent-response': (event: any) => void
  * - 'trigger-event': (event: any) => void
  * - 'connected': () => void
@@ -103,7 +102,6 @@ export declare class XYWebSocketManager extends EventEmitter {
      * Start heartbeat.
      */
     private startHeartbeat;
-    private toAskUserResponse;
     private toUploadExeDataEvent;
     private toCrossDeviceTaskResultEvent;
     private toRunCrossTaskA2ARequest;
@@ -116,18 +114,19 @@ export declare class XYWebSocketManager extends EventEmitter {
      */
     private handleClose;
     /**
-     * Handle connection activity (protocol pong or app-level heartbeat response).
-     * Reports health and flushes the reconnect buffer early instead of waiting the full 10s.
-     */
-    private handleHeartbeatActivity;
-    /**
      * Handle connection error.
      */
     private handleError;
     /**
-     * Reconnect with fast-retry-then-backoff schedule.
-     * 前几次快速重试（0.5/1/1/2/4s + 随机抖动），之后指数退避封顶 30s。
-     * 修复：旧版首次就 1s 起步指数增长，503 场景累计 31s+10s 缓冲 = 42s 才恢复。
+     * Reconnect with exponential backoff + full jitter.
+     *
+     * A server outage makes every client detect the drop at the same moment and
+     * start from the same attempt counter, so a deterministic delay sequence
+     * (1s, 2s, 4s, ...) makes all clients reconnect in lock-step waves. Full
+     * jitter draws each delay uniformly from [0, window] so the herd spreads
+     * out and stays decorrelated even after many rounds at the cap:
+     * - attempt 1: window = reconnectFirstMaxMs (dilutes the first burst)
+     * - attempt ≥2: window = min(base * 2^(n-1), reconnectMaxMs)
      */
     private reconnectServer;
 }
